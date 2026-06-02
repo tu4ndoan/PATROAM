@@ -1,0 +1,8 @@
+pyaudio
+pyttsx3
+SpeechRecognition
+# Natural neural British voice (optional — offline SAPI voice is the fallback):
+edge-tts
+pygame
+# WebGL orb window (optional — falls back to the classic Tk window):
+pywebview

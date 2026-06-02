@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>PATROAM</title>
+<style>
+  :root { --accent:#7b5cff; --muted:#6b7488; --fg:#e8ecf7; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; background:#0a0612;
+    font-family:"Courier New", ui-monospace, monospace; color:var(--fg);
+    -webkit-user-select:none; user-select:none; }
+  #orb { position:fixed; inset:0; display:block; }
+  #ui { position:fixed; inset:0; pointer-events:none; }
+  #ui > * { pointer-events:auto; }
+
+  .brand { position:absolute; top:16px; left:20px; font-weight:bold;
+    letter-spacing:2px; color:#8aa6ff; text-shadow:0 0 12px rgba(123,92,255,.7); }
+  .top-right { position:absolute; top:14px; right:18px; display:flex; gap:8px; align-items:center; }
+  select, .glass { background:rgba(20,16,34,.6); color:var(--fg);
+    border:1px solid rgba(150,130,230,.28); border-radius:8px; padding:6px 8px;
+    font-family:inherit; font-size:13px; backdrop-filter:blur(8px); outline:none; }
+  .iconbtn { cursor:pointer; }
+
+  .status { position:absolute; left:0; right:0; bottom:96px; text-align:center;
+    color:var(--muted); font-size:13px; letter-spacing:1px; min-height:18px;
+    text-shadow:0 0 10px rgba(0,0,0,.8); }
+
+  .bar { position:absolute; left:50%; bottom:22px; transform:translateX(-50%);
+    display:flex; gap:10px; align-items:center; width:min(720px, 92vw);
+    background:rgba(16,12,28,.55); border:1px solid rgba(150,130,230,.22);
+    border-radius:16px; padding:10px 12px; backdrop-filter:blur(10px);
+    box-shadow:0 8px 40px rgba(0,0,0,.5); }
+  .btn { cursor:pointer; border:1px solid rgba(150,130,230,.25);
+    background:rgba(30,24,48,.8); color:var(--fg); border-radius:10px;
+    padding:9px 12px; font-family:inherit; font-weight:bold; font-size:13px;
+    white-space:nowrap; transition:.15s; }
+  .btn:hover { border-color:var(--accent); }
+  .btn.on { color:#22c55e; border-color:#22c55e; box-shadow:0 0 14px rgba(34,197,94,.35); }
+  .btn.rec { color:#ef4444; border-color:#ef4444; box-shadow:0 0 16px rgba(239,68,68,.4); }
+  #text { flex:1; min-width:60px; background:rgba(8,6,16,.7); color:var(--fg);
+    border:1px solid rgba(150,130,230,.25); border-radius:10px; padding:10px 12px;
+    font-family:inherit; font-size:14px; outline:none; }
+  #text:focus { border-color:var(--accent); }
+  #send { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .hint { position:absolute; left:20px; bottom:26px; color:var(--muted);
+    font-size:11px; opacity:.55; }
+</style>
+</head>
+<body>
+  <canvas id="orb"></canvas>
+  <div id="ui">
+    <div class="brand">⬡ PATROAM</div>
+    <div class="top-right">
+      <select id="model" class="glass" title="Model"></select>
+      <span id="refresh" class="glass iconbtn" title="Refresh models">⟳</span>
+    </div>
+    <div id="status" class="status"></div>
+    <div class="hint">drag to rotate · scroll to zoom</div>
+    <div class="bar">
+      <button id="mic" class="btn" title="Hold to talk">🎙 Hold</button>
+      <button id="wake" class="btn" title="Always-on wake word">😴 Always-on</button>
+      <button id="tts" class="btn on" title="Speak replies">🔊</button>
+      <input id="text" placeholder="Type a command, Master…" />
+      <button id="send" class="btn">→</button>
+    </div>
+  </div>
+
+<script>
+"use strict";
+// ── Pure Canvas2D wireframe orb — no WebGL, no libraries, works offline ────────
+const cv = document.getElementById('orb');
+const ctx = cv.getContext('2d');
+let DPR = Math.min(window.devicePixelRatio || 1, 1.5);
+let W = 0, H = 0;
+
+function resize(){
+  W = innerWidth; H = innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+addEventListener('resize', resize); resize();
+
+// ── State presets (blue → magenta when active, like the reference) ─────────────
+const lerp = (a,b,t)=>a+(b-a)*t;
+function hex(h){ h=h.replace('#',''); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
+function mix(c1,c2,t){ return c1.map((v,i)=>Math.round(lerp(v,c2[i],t))); }
+function rgba(c,a){ return `rgba(${c[0]},${c[1]},${c[2]},${a})`; }
+
+const STATES = {
+  idle:      { c1:hex('#2a3a8c'), c2:hex('#5a2a8c'), amp:0.07, speed:0.10, glow:0.5, dots:0.6 },
+  sleeping:  { c1:hex('#2f53b0'), c2:hex('#6a2fae'), amp:0.10, speed:0.12, glow:0.6, dots:0.7 },
+  listening: { c1:hex('#2f7bff'), c2:hex('#c23bff'), amp:0.18, speed:0.30, glow:1.0, dots:1.0 },
+  thinking:  { c1:hex('#5a4bff'), c2:hex('#ff3bd0'), amp:0.22, speed:0.55, glow:1.0, dots:1.0 },
+  speaking:  { c1:hex('#22b9ff'), c2:hex('#ff4bd6'), amp:0.28, speed:0.40, glow:1.2, dots:1.0 },
+};
+let target = STATES.idle;
+const cur = { c1:target.c1.slice(), c2:target.c2.slice(), amp:target.amp,
+              speed:target.speed, glow:target.glow, dots:target.dots };
+
+// ── Sphere mesh (UV grid) ──────────────────────────────────────────────────────
+const LON = 40, LAT = 26, D = 3.2;
+const verts = [];                          // base directions on the unit sphere
+for (let i = 0; i <= LAT; i++){
+  const phi = Math.PI * i / LAT;
+  const sp = Math.sin(phi), cp = Math.cos(phi);
+  for (let j = 0; j <= LON; j++){
+    const th = 2 * Math.PI * j / LON;
+    verts.push({ phi, th, x: sp*Math.cos(th), y: cp, z: sp*Math.sin(th) });
+  }
+}
+const idx = (i,j)=> i*(LON+1) + j;
+
+// Surrounding dot cloud.
+const cloud = [];
+for (let k = 0; k < 220; k++){
+  const u = Math.random(), v = Math.random();
+  const th = 2*Math.PI*u, ph = Math.acos(2*v-1);
+  const r = 1.18 + Math.random()*0.18;
+  cloud.push({ x:r*Math.sin(ph)*Math.cos(th), y:r*Math.cos(ph), z:r*Math.sin(ph)*Math.sin(th) });
+}
+
+// ── Interaction ────────────────────────────────────────────────────────────────
+let rotX = -0.35, rotY = 0.4, zoom = 1, dragging = false, autoSpin = true, lastX, lastY;
+cv.addEventListener('pointerdown', e=>{ dragging=true; autoSpin=false; lastX=e.clientX; lastY=e.clientY; });
+addEventListener('pointerup', ()=>{ dragging=false; setTimeout(()=>autoSpin=true, 2500); });
+addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  rotY += (e.clientX-lastX)*0.006; rotX += (e.clientY-lastY)*0.006;
+  rotX = Math.max(-1.4, Math.min(1.4, rotX)); lastX=e.clientX; lastY=e.clientY;
+});
+cv.addEventListener('wheel', e=>{ e.preventDefault(); zoom = Math.max(0.55, Math.min(2.4, zoom*(1 - e.deltaY*0.0012))); }, {passive:false});
+
+// ── Render loop ──────────────────────────────────────────────────────────────────
+let t = 0, last = performance.now();
+let frames = 0, fpsT = performance.now(), tier = 0;
+
+function project(p, scale, cx, cy, cosX, sinX, cosY, sinY){
+  const x1 = p.x*cosY + p.z*sinY;
+  const z1 = -p.x*sinY + p.z*cosY;
+  const y2 = p.y*cosX - z1*sinX;
+  const z2 = p.y*sinX + z1*cosX;
+  const persp = D/(D - z2);
+  return { sx: cx + x1*persp*scale, sy: cy - y2*persp*scale };
+}
+
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now-last)/1000); last = now;
+  t += dt;
+
+  // Ease current params toward the target state.
+  const k = Math.min(1, dt*3);
+  cur.c1 = mix(cur.c1, target.c1, k); cur.c2 = mix(cur.c2, target.c2, k);
+  cur.amp=lerp(cur.amp,target.amp,k); cur.speed=lerp(cur.speed,target.speed,k);
+  cur.glow=lerp(cur.glow,target.glow,k); cur.dots=lerp(cur.dots,target.dots,k);
+  if(autoSpin) rotY += cur.speed*dt;
+
+  const cx = W/2, cy = H/2, scale = Math.min(W,H)*0.30*zoom;
+  const cosX=Math.cos(rotX), sinX=Math.sin(rotX), cosY=Math.cos(rotY), sinY=Math.sin(rotY);
+
+  // Background wash.
+  ctx.globalCompositeOperation = 'source-over';
+  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W,H)*0.7);
+  bg.addColorStop(0, '#140a22'); bg.addColorStop(1, '#08040f');
+  ctx.fillStyle = bg; ctx.fillRect(0,0,W,H);
+
+  // Displace + project every vertex.
+  const sp = [];
+  for (let n=0; n<verts.length; n++){
+    const p = verts[n];
+    const wob = 0.55*Math.sin(3*p.phi + t*1.2) + 0.45*Math.sin(4*p.th + t*0.9)
+              + 0.30*Math.sin(6*p.phi + 5*p.th - t*1.6);
+    const r = 1 + cur.amp*wob;
+    sp.push(project({x:p.x*r, y:p.y*r, z:p.z*r}, scale, cx, cy, cosX, sinX, cosY, sinY));
+  }
+
+  // Build the whole wireframe as one path.
+  const path = new Path2D();
+  for (let j=0; j<=LON; j++){                 // longitude lines
+    let s = sp[idx(0,j)]; path.moveTo(s.sx, s.sy);
+    for (let i=1; i<=LAT; i++){ s = sp[idx(i,j)]; path.lineTo(s.sx, s.sy); }
+  }
+  for (let i=0; i<=LAT; i++){                  // latitude rings
+    let s = sp[idx(i,0)]; path.moveTo(s.sx, s.sy);
+    for (let j=1; j<=LON; j++){ s = sp[idx(i,j)]; path.lineTo(s.sx, s.sy); }
+  }
+
+  // Screen-space gradient (left=c1 blue, right=c2 magenta), drawn additively.
+  ctx.globalCompositeOperation = 'lighter';
+  const grad = ctx.createLinearGradient(cx-scale, cy-scale, cx+scale, cy+scale);
+  grad.addColorStop(0, rgba(cur.c1, 0.9)); grad.addColorStop(1, rgba(cur.c2, 0.9));
+  const glowGrad = ctx.createLinearGradient(cx-scale, cy-scale, cx+scale, cy+scale);
+  glowGrad.addColorStop(0, rgba(cur.c1, 0.18*cur.glow)); glowGrad.addColorStop(1, rgba(cur.c2, 0.18*cur.glow));
+
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = glowGrad; ctx.lineWidth = 3.0; ctx.stroke(path);   // soft glow pass
+  ctx.strokeStyle = grad;     ctx.lineWidth = 0.9; ctx.stroke(path);   // crisp pass
+
+  // Vertex dots (sparse) + surrounding cloud.
+  ctx.fillStyle = grad;
+  const step = tier >= 1 ? 2 : 1;
+  for (let i=0; i<=LAT; i+=step) for (let j=0; j<=LON; j+=step){
+    const s = sp[idx(i,j)]; ctx.fillRect(s.sx-0.8, s.sy-0.8, 1.6, 1.6);
+  }
+  const ca = 0.5*cur.dots;
+  ctx.fillStyle = rgba(mix(cur.c1, cur.c2, 0.5), ca);
+  for (let n=0; n<cloud.length; n++){
+    const s = project(cloud[n], scale, cx, cy, cosX, sinX, cosY, sinY);
+    ctx.fillRect(s.sx-1, s.sy-1, 2, 2);
+  }
+
+  // Adaptive: if fps stays low, thin the dots then drop DPR.
+  frames++;
+  if(now - fpsT >= 1000){
+    const fps = frames*1000/(now-fpsT); frames=0; fpsT=now;
+    if(fps < 30 && tier < 2){ tier++; if(tier===2 && DPR>1){ DPR=1; resize(); } }
+  }
+}
+requestAnimationFrame(frame);
+
+// ── Bridge: Python -> page ──────────────────────────────────────────────────────
+window.patroam = {
+  setState(name){ if(STATES[name]) target = STATES[name]; },
+  setStatus(msg){ document.getElementById('status').textContent = msg || ''; },
+  setModels(list){
+    const sel=document.getElementById('model'); sel.innerHTML='';
+    (list&&list.length?list:['(no models)']).forEach(m=>{
+      const o=document.createElement('option'); o.value=o.textContent=m; sel.appendChild(o);
+    });
+  },
+};
+
+// ── Bridge: page -> Python ────────────────────────────────────────────────────────
+const api = ()=> (window.pywebview && window.pywebview.api) || null;
+const $ = (id)=>document.getElementById(id);
+$('send').onclick = ()=>{ const v=$('text').value.trim(); if(v&&api()){ api().send(v); $('text').value=''; } };
+$('text').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); $('send').onclick(); } });
+$('model').onchange = ()=>{ api()&&api().set_model($('model').value); };
+$('refresh').onclick = async ()=>{ if(api()){ const m=await api().get_models(); window.patroam.setModels(m); } };
+
+let ttsOn=true;
+$('tts').onclick = ()=>{ ttsOn=!ttsOn; $('tts').classList.toggle('on',ttsOn); api()&&api().set_tts(ttsOn); };
+
+const mic=$('mic');
+const press=()=>{ api()&&api().record_start(); mic.classList.add('rec'); mic.textContent='● Rec'; };
+const release=()=>{ if(!mic.classList.contains('rec'))return; mic.classList.remove('rec'); mic.textContent='🎙 Hold'; api()&&api().record_stop(); };
+mic.addEventListener('mousedown', press); mic.addEventListener('mouseup', release); mic.addEventListener('mouseleave', release);
+mic.addEventListener('touchstart', e=>{e.preventDefault();press();}); mic.addEventListener('touchend', e=>{e.preventDefault();release();});
+
+let wakeOn=false;
+$('wake').onclick = async ()=>{
+  if(!api())return; wakeOn = await api().toggle_always_on();
+  $('wake').classList.toggle('on', wakeOn);
+  $('wake').textContent = wakeOn ? '👂 Always-on' : '😴 Always-on';
+  mic.disabled = wakeOn; mic.style.opacity = wakeOn ? .4 : 1;
+};
+
+function boot(){
+  const a=api(); if(!a){ setTimeout(boot, 120); return; }
+  a.ready().then(info=>{
+    if(!info) return;
+    window.patroam.setModels(info.models||[]);
+    ttsOn = info.tts!==false; $('tts').classList.toggle('on', ttsOn);
+    if(info.state) window.patroam.setState(info.state);
+  });
+}
+window.addEventListener('pywebviewready', boot);
+setTimeout(boot, 400);
+</script>
+</body>
+</html>
