@@ -50,6 +50,8 @@ class PatroamChat(tk.Tk):
         self._refresh_models()
         self._set_visual_state("idle")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Always-on by default — start listening shortly after the window is up.
+        self.after(700, self._toggle_always_on)
 
     # ── UI ────────────────────────────────────────────────────────────────────
     def _build_ui(self):

@@ -26,13 +26,17 @@ Early. The package today provides:
 - **Command execution** — acts on system commands instead of just chatting.
   "Open Spotify" / "launch VS Code" / "close Chrome" actually launch/close the
   app (resolved via Start Menu, registered URI schemes, App Paths, or PATH;
-  unknown names like "open YouTube" fall back to the website). See `skills.py`.
-- **3D WebGL orb** — the default window is a Three.js particle-sphere energy
-  core with additive glow, bloom postprocessing, a swirling accretion disk and
-  energy filaments. Drag to rotate, scroll to zoom (interactable), and it reacts
-  to state — colour, turbulence, rotation, bloom (orange core + blue energy when
-  active, cool and calm when asleep). Runs in a native window via pywebview;
-  falls back to a lightweight Tk orb (`--tk`) if pywebview/WebGL is unavailable.
+  unknown names like "open YouTube" fall back to the website). "Play some music"
+  opens Spotify on your Liked Songs and starts playback. See `skills.py`.
+- **Always-on by default** — the wake-word listener starts automatically; just
+  say "hey patroam". (Toggle it off with the on-screen button if needed.)
+- **Wireframe orb** — the default window is a glowing, displaced wireframe
+  sphere (blue→magenta neon, bright nodes, surrounding dot cloud, pink bloom).
+  It's pure Canvas 2D — **no WebGL/GPU and no CDN**, so it's light and works
+  offline. Drag to rotate, scroll to zoom (interactable); it reacts to state
+  via colour, surface turbulence, rotation and glow, with an adaptive quality
+  step-down if the framerate dips. Runs in a native window via pywebview;
+  falls back to a Tk orb (`--tk`) if pywebview is unavailable.
 
 ## Run
 
@@ -43,8 +47,8 @@ pip install -r requirements.txt   # or let app.py auto-install on first run
 ollama serve
 ollama pull llama3
 
-python app.py            # 3D WebGL orb window (drag to rotate, scroll to zoom)
-python app.py --tk       # classic lightweight Tk orb (no WebGL needed)
+python app.py            # wireframe orb window (drag to rotate, scroll to zoom)
+python app.py --tk       # classic Tk orb fallback
 python app.py --daemon   # headless, wake-word only
 ```
 
@@ -63,7 +67,7 @@ patroam/
     recorder.py        push-to-talk capture
     tts.py             spoken replies
   ui/webview_app.py    default UI: controller + pywebview bridge to the orb
-  ui/web/index.html    Three.js 3D orb (WebGL, bloom, interactable)
+  ui/web/index.html    Canvas2D wireframe orb (no WebGL/CDN, interactable)
   ui/chat.py           classic Tk window (--tk fallback)
   ui/visualizer.py     2D animated orb used by the Tk window
 ```

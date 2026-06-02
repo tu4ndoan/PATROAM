@@ -9,10 +9,13 @@ This is the seed of PATROAM's command-execution pillar; add more skills here.
 """
 
 import os
+import random
 import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 import webbrowser
 
 IS_WIN = sys.platform.startswith("win")
@@ -20,6 +23,12 @@ IS_MAC = sys.platform == "darwin"
 
 OPEN_VERBS = r"open|launch|start|run|fire up|bring up|pull up|boot up"
 CLOSE_VERBS = r"close|quit|exit|kill|terminate"
+
+# "play some music", "put on my liked songs", "play music on spotify", …
+MUSIC_RE = re.compile(
+    r"\b(play|put on|start|throw on)\b.*\b(music|song|songs|tunes|playlist|spotify|liked)\b",
+    re.I)
+LIKED_SONGS_URI = "spotify:collection:tracks"
 
 # Words to strip from a spoken app name ("open the spotify app please" -> spotify)
 _FILLER = {
@@ -194,16 +203,65 @@ def close_app(name):
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
+def _media_play():
+    """Send the OS 'play' command (Spotify resumes / starts the loaded context)."""
+    try:
+        if IS_WIN:
+            import ctypes
+            VK_PLAY_PAUSE = 0xB3
+            ctypes.windll.user32.keybd_event(VK_PLAY_PAUSE, 0, 0, 0)
+            ctypes.windll.user32.keybd_event(VK_PLAY_PAUSE, 0, 2, 0)  # key up
+        elif IS_MAC:
+            subprocess.run(["osascript", "-e", 'tell application "Spotify" to play'])
+        else:
+            subprocess.run(["playerctl", "play"])
+    except Exception:
+        pass
+
+
+def play_music():
+    """Open Spotify on the user's Liked Songs and start playback.
+
+    No Spotify login/API needed: we deep-link to the Liked Songs view, then send
+    the media Play key once Spotify has had a moment to come up.
+    """
+    def worker():
+        try:
+            if IS_WIN:
+                os.startfile(LIKED_SONGS_URI)
+            elif IS_MAC:
+                subprocess.run(["open", LIKED_SONGS_URI])
+            else:
+                subprocess.Popen(["xdg-open", LIKED_SONGS_URI])
+        except Exception:
+            open_app("spotify")  # fall back to just opening the app
+        time.sleep(3.0)          # let Spotify launch / navigate
+        _media_play()
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
+def _addr():
+    """An honorific now and then — most of the time, nothing."""
+    return random.choice([", Master", ", Sir"]) if random.random() < 0.3 else ""
+
+
 def try_handle(text):
     """Handle `text` as a system command. Returns a spoken reply, or None."""
+    if MUSIC_RE.search(text):
+        play_music()
+        return f"Putting on your Liked Songs{_addr()}."
+
     action, app = parse_command(text)
     if not action:
         return None
     title = app.title()
+    a = _addr()
     if action == "open":
         if open_app(app):
-            return f"Right away, Master — opening {title}."
-        return f"My apologies, Master, I couldn't find {title} on this system."
+            return f"Opening {title}{a}."
+        return f"I couldn't find {title} on this system{a}."
     if close_app(app):
-        return f"Closing {title}, Master."
-    return f"I couldn't close {title}, Master — perhaps it isn't running."
+        return f"Closing {title}{a}."
+    return f"I couldn't close {title}{a} — perhaps it isn't running."

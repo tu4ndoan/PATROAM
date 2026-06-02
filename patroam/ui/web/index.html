@@ -7,25 +7,22 @@
 <style>
   :root { --accent:#7b5cff; --muted:#6b7488; --fg:#e8ecf7; }
   * { box-sizing:border-box; }
-  html, body { margin:0; height:100%; overflow:hidden; background:#0a0612;
+  html, body { margin:0; height:100%; overflow:hidden; background:#05030d;
     font-family:"Courier New", ui-monospace, monospace; color:var(--fg);
     -webkit-user-select:none; user-select:none; }
   #orb { position:fixed; inset:0; display:block; }
   #ui { position:fixed; inset:0; pointer-events:none; }
   #ui > * { pointer-events:auto; }
-
   .brand { position:absolute; top:16px; left:20px; font-weight:bold;
-    letter-spacing:2px; color:#8aa6ff; text-shadow:0 0 12px rgba(123,92,255,.7); }
+    letter-spacing:2px; color:#9aa8ff; text-shadow:0 0 12px rgba(123,92,255,.7); }
   .top-right { position:absolute; top:14px; right:18px; display:flex; gap:8px; align-items:center; }
   select, .glass { background:rgba(20,16,34,.6); color:var(--fg);
     border:1px solid rgba(150,130,230,.28); border-radius:8px; padding:6px 8px;
     font-family:inherit; font-size:13px; backdrop-filter:blur(8px); outline:none; }
   .iconbtn { cursor:pointer; }
-
   .status { position:absolute; left:0; right:0; bottom:96px; text-align:center;
     color:var(--muted); font-size:13px; letter-spacing:1px; min-height:18px;
     text-shadow:0 0 10px rgba(0,0,0,.8); }
-
   .bar { position:absolute; left:50%; bottom:22px; transform:translateX(-50%);
     display:flex; gap:10px; align-items:center; width:min(720px, 92vw);
     background:rgba(16,12,28,.55); border:1px solid rgba(150,130,230,.22);
@@ -43,8 +40,7 @@
     font-family:inherit; font-size:14px; outline:none; }
   #text:focus { border-color:var(--accent); }
   #send { background:var(--accent); border-color:var(--accent); color:#fff; }
-  .hint { position:absolute; left:20px; bottom:26px; color:var(--muted);
-    font-size:11px; opacity:.55; }
+  .hint { position:absolute; left:20px; bottom:26px; color:var(--muted); font-size:11px; opacity:.55; }
 </style>
 </head>
 <body>
@@ -56,7 +52,7 @@
       <span id="refresh" class="glass iconbtn" title="Refresh models">⟳</span>
     </div>
     <div id="status" class="status"></div>
-    <div class="hint">drag to rotate · scroll to zoom</div>
+    <div class="hint">drag to rotate · scroll to zoom · click to pulse</div>
     <div class="bar">
       <button id="mic" class="btn" title="Hold to talk">🎙 Hold</button>
       <button id="wake" class="btn" title="Always-on wake word">😴 Always-on</button>
@@ -68,203 +64,181 @@
 
 <script>
 "use strict";
-// ── Pure Canvas2D wireframe orb — no WebGL, no libraries, works offline ────────
+// ── Neural-network orb, pure Canvas2D (no WebGL / no libraries / offline) ──────
 const cv = document.getElementById('orb');
 const ctx = cv.getContext('2d');
 let DPR = Math.min(window.devicePixelRatio || 1, 1.5);
-let W = 0, H = 0;
+let W=0, H=0;
+function resize(){ W=innerWidth; H=innerHeight; cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0); makeStars(); }
+addEventListener('resize', resize);
 
-function resize(){
-  W = innerWidth; H = innerHeight;
-  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-}
-addEventListener('resize', resize); resize();
-
-// ── State presets (blue → magenta when active, like the reference) ─────────────
-const lerp = (a,b,t)=>a+(b-a)*t;
+const lerp=(a,b,t)=>a+(b-a)*t;
 function hex(h){ h=h.replace('#',''); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
-function mix(c1,c2,t){ return c1.map((v,i)=>Math.round(lerp(v,c2[i],t))); }
+function mix(a,b,t){ return [Math.round(lerp(a[0],b[0],t)),Math.round(lerp(a[1],b[1],t)),Math.round(lerp(a[2],b[2],t))]; }
 function rgba(c,a){ return `rgba(${c[0]},${c[1]},${c[2]},${a})`; }
 
+// ── State presets (purple-nebula → magenta) ────────────────────────────────────
 const STATES = {
-  idle:      { c1:hex('#2a3a8c'), c2:hex('#5a2a8c'), amp:0.07, speed:0.10, glow:0.5, dots:0.6 },
-  sleeping:  { c1:hex('#2f53b0'), c2:hex('#6a2fae'), amp:0.10, speed:0.12, glow:0.6, dots:0.7 },
-  listening: { c1:hex('#2f7bff'), c2:hex('#c23bff'), amp:0.18, speed:0.30, glow:1.0, dots:1.0 },
-  thinking:  { c1:hex('#5a4bff'), c2:hex('#ff3bd0'), amp:0.22, speed:0.55, glow:1.0, dots:1.0 },
-  speaking:  { c1:hex('#22b9ff'), c2:hex('#ff4bd6'), amp:0.28, speed:0.40, glow:1.2, dots:1.0 },
+  idle:      { c1:hex('#3357ff'), c2:hex('#c23bff'), spin:0.05, flow:0.8, energy:0.55, auto:0 },
+  sleeping:  { c1:hex('#2f6bff'), c2:hex('#b13bff'), spin:0.06, flow:0.7, energy:0.6,  auto:0 },
+  listening: { c1:hex('#2f9bff'), c2:hex('#ff3bd0'), spin:0.16, flow:1.6, energy:1.0,  auto:3.0 },
+  thinking:  { c1:hex('#6a4bff'), c2:hex('#ff3bd0'), spin:0.30, flow:2.2, energy:1.0,  auto:1.5 },
+  speaking:  { c1:hex('#22c3ff'), c2:hex('#ff4bd6'), spin:0.20, flow:2.0, energy:1.2,  auto:1.1 },
 };
 let target = STATES.idle;
-const cur = { c1:target.c1.slice(), c2:target.c2.slice(), amp:target.amp,
-              speed:target.speed, glow:target.glow, dots:target.dots };
+const cur = { c1:target.c1.slice(), c2:target.c2.slice(), spin:target.spin, flow:target.flow, energy:target.energy, auto:0 };
 
-// ── Sphere mesh (UV grid) ──────────────────────────────────────────────────────
-const LON = 40, LAT = 26, D = 3.2;
-const verts = [];                          // base directions on the unit sphere
-for (let i = 0; i <= LAT; i++){
-  const phi = Math.PI * i / LAT;
-  const sp = Math.sin(phi), cp = Math.cos(phi);
-  for (let j = 0; j <= LON; j++){
-    const th = 2 * Math.PI * j / LON;
-    verts.push({ phi, th, x: sp*Math.cos(th), y: cp, z: sp*Math.sin(th) });
+// ── Build the node graph (concentric shells, a "crystalline sphere") ──────────
+const GA = Math.PI*(3-Math.sqrt(5));
+const nodes = [];
+const SHELLS = [ {r:0.0,n:1,sz:3.2},{r:0.5,n:26,sz:2.3},{r:0.85,n:64,sz:1.8},{r:1.18,n:120,sz:1.3} ];
+for(const sh of SHELLS){
+  for(let k=0;k<sh.n;k++){
+    let x,y,z;
+    if(sh.n===1){ x=y=z=0; }
+    else { const yy=1-(k+0.5)/sh.n*2, rad=Math.sqrt(Math.max(0,1-yy*yy)), th=k*GA;
+           x=Math.cos(th)*rad*sh.r; y=yy*sh.r; z=Math.sin(th)*rad*sh.r; }
+    nodes.push({ x,y,z, sz:sh.sz, rad:Math.hypot(x,y,z), phase:Math.random()*6.28,
+                 col:0, sx:0, sy:0, persp:1 });
   }
 }
-const idx = (i,j)=> i*(LON+1) + j;
+// Colour position 0..1 across X (left=blue, right=magenta).
+for(const nd of nodes) nd.col = Math.max(0, Math.min(1, (nd.x+1.2)/2.4));
 
-// Surrounding dot cloud.
-const cloud = [];
-for (let k = 0; k < 220; k++){
-  const u = Math.random(), v = Math.random();
-  const th = 2*Math.PI*u, ph = Math.acos(2*v-1);
-  const r = 1.18 + Math.random()*0.18;
-  cloud.push({ x:r*Math.sin(ph)*Math.cos(th), y:r*Math.cos(ph), z:r*Math.sin(ph)*Math.sin(th) });
+// Edges: connect each node to its 2 nearest neighbours (computed once).
+const edges = [];
+const seen = new Set();
+for(let i=0;i<nodes.length;i++){
+  const a=nodes[i]; const d=[];
+  for(let j=0;j<nodes.length;j++){ if(i===j)continue;
+    const b=nodes[j]; const dd=(a.x-b.x)**2+(a.y-b.y)**2+(a.z-b.z)**2; d.push([dd,j]); }
+  d.sort((p,q)=>p[0]-q[0]);
+  for(let m=0;m<2;m++){ const j=d[m][1]; const key=i<j?i+'_'+j:j+'_'+i;
+    if(!seen.has(key)){ seen.add(key); edges.push({a:i,b:j,phase:Math.random()*6.28}); } }
 }
+// Bucket edges by colour so the whole web draws in a handful of stroke calls.
+const NB = 8;
+for(const ed of edges){ const c=(nodes[ed.a].col+nodes[ed.b].col)*0.5;
+  ed.bucket=Math.min(NB-1, Math.max(0, Math.round(c*(NB-1)))); }
 
-// ── Interaction ────────────────────────────────────────────────────────────────
-let rotX = -0.35, rotY = 0.4, zoom = 1, dragging = false, autoSpin = true, lastX, lastY;
-cv.addEventListener('pointerdown', e=>{ dragging=true; autoSpin=false; lastX=e.clientX; lastY=e.clientY; });
-addEventListener('pointerup', ()=>{ dragging=false; setTimeout(()=>autoSpin=true, 2500); });
-addEventListener('pointermove', e=>{
-  if(!dragging) return;
-  rotY += (e.clientX-lastX)*0.006; rotX += (e.clientY-lastY)*0.006;
-  rotX = Math.max(-1.4, Math.min(1.4, rotX)); lastX=e.clientX; lastY=e.clientY;
-});
-cv.addEventListener('wheel', e=>{ e.preventDefault(); zoom = Math.max(0.55, Math.min(2.4, zoom*(1 - e.deltaY*0.0012))); }, {passive:false});
+// ── Starfield ─────────────────────────────────────────────────────────────────
+let stars=[];
+function makeStars(){ stars=[]; const n=Math.round(W*H/14000);
+  for(let i=0;i<n;i++) stars.push({x:Math.random()*W,y:Math.random()*H,b:0.2+Math.random()*0.5,ph:Math.random()*6.28}); }
+resize();
+
+// ── Interaction ─────────────────────────────────────────────────────────────────
+let rotX=-0.2, rotY=0.5, zoom=1, dragging=false, moved=false, autoSpin=true, lastX, lastY;
+const pulses=[];
+function addPulse(){ pulses.push(performance.now()/1000); if(pulses.length>5) pulses.shift(); }
+cv.addEventListener('pointerdown', e=>{ dragging=true; moved=false; autoSpin=false; lastX=e.clientX; lastY=e.clientY; });
+addEventListener('pointerup', ()=>{ if(dragging&&!moved) addPulse(); dragging=false; setTimeout(()=>autoSpin=true,2500); });
+addEventListener('pointermove', e=>{ if(!dragging)return; const dx=e.clientX-lastX, dy=e.clientY-lastY;
+  if(Math.abs(dx)+Math.abs(dy)>3) moved=true;
+  rotY+=dx*0.006; rotX=Math.max(-1.4,Math.min(1.4,rotX+dy*0.006)); lastX=e.clientX; lastY=e.clientY; });
+cv.addEventListener('wheel', e=>{ e.preventDefault(); zoom=Math.max(0.55,Math.min(2.4,zoom*(1-e.deltaY*0.0012))); }, {passive:false});
 
 // ── Render loop ──────────────────────────────────────────────────────────────────
-let t = 0, last = performance.now();
-let frames = 0, fpsT = performance.now(), tier = 0;
+const D=3.4; let t=0, last=performance.now(), autoT=0;
+let frames=0, fpsT=performance.now(), tier=0;
 
-function project(p, scale, cx, cy, cosX, sinX, cosY, sinY){
-  const x1 = p.x*cosY + p.z*sinY;
-  const z1 = -p.x*sinY + p.z*cosY;
-  const y2 = p.y*cosX - z1*sinX;
-  const z2 = p.y*sinX + z1*cosX;
-  const persp = D/(D - z2);
-  return { sx: cx + x1*persp*scale, sy: cy - y2*persp*scale };
+function pulseBoost(rad, now){
+  let s=0;
+  for(let k=0;k<pulses.length;k++){ const wave=(now-pulses[k])*1.2; if(wave>1.8) continue;
+    const d=rad-wave; s += Math.exp(-(d*d)/0.02); }
+  return s;
 }
 
 function frame(now){
   requestAnimationFrame(frame);
-  const dt = Math.min(0.05, (now-last)/1000); last = now;
-  t += dt;
+  const dt=Math.min(0.05,(now-last)/1000); last=now; t+=dt;
+  const k=Math.min(1,dt*3);
+  cur.c1=mix(cur.c1,target.c1,k); cur.c2=mix(cur.c2,target.c2,k);
+  cur.spin=lerp(cur.spin,target.spin,k); cur.flow=lerp(cur.flow,target.flow,k);
+  cur.energy=lerp(cur.energy,target.energy,k); cur.auto=lerp(cur.auto,target.auto,k);
+  if(autoSpin) rotY+=cur.spin*dt;
 
-  // Ease current params toward the target state.
-  const k = Math.min(1, dt*3);
-  cur.c1 = mix(cur.c1, target.c1, k); cur.c2 = mix(cur.c2, target.c2, k);
-  cur.amp=lerp(cur.amp,target.amp,k); cur.speed=lerp(cur.speed,target.speed,k);
-  cur.glow=lerp(cur.glow,target.glow,k); cur.dots=lerp(cur.dots,target.dots,k);
-  if(autoSpin) rotY += cur.speed*dt;
+  // Auto energy pulses when active.
+  if(cur.auto>0.05){ autoT+=dt; if(autoT>cur.auto){ autoT=0; addPulse(); } }
 
-  const cx = W/2, cy = H/2, scale = Math.min(W,H)*0.30*zoom;
+  const cx=W/2, cy=H/2, scale=Math.min(W,H)*0.32*zoom;
   const cosX=Math.cos(rotX), sinX=Math.sin(rotX), cosY=Math.cos(rotY), sinY=Math.sin(rotY);
+  const sizeK=Math.min(W,H)*0.022;
+  const nowS=now/1000;
 
-  // Background wash.
-  ctx.globalCompositeOperation = 'source-over';
-  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W,H)*0.7);
-  bg.addColorStop(0, '#140a22'); bg.addColorStop(1, '#08040f');
-  ctx.fillStyle = bg; ctx.fillRect(0,0,W,H);
+  // Background + starfield.
+  ctx.globalCompositeOperation='source-over';
+  const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,Math.max(W,H)*0.7);
+  bg.addColorStop(0,'#100726'); bg.addColorStop(1,'#04030a');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  ctx.globalCompositeOperation='lighter';
+  for(let i=0;i<stars.length;i++){ const s=stars[i]; const a=s.b*(0.4+0.6*Math.sin(t*2+s.ph));
+    ctx.fillStyle='rgba(150,160,220,'+a.toFixed(3)+')'; ctx.fillRect(s.x,s.y,1.3,1.3); }
 
-  // Displace + project every vertex.
-  const sp = [];
-  for (let n=0; n<verts.length; n++){
-    const p = verts[n];
-    const wob = 0.55*Math.sin(3*p.phi + t*1.2) + 0.45*Math.sin(4*p.th + t*0.9)
-              + 0.30*Math.sin(6*p.phi + 5*p.th - t*1.6);
-    const r = 1 + cur.amp*wob;
-    sp.push(project({x:p.x*r, y:p.y*r, z:p.z*r}, scale, cx, cy, cosX, sinX, cosY, sinY));
-  }
+  // Project nodes.
+  for(let n=0;n<nodes.length;n++){ const p=nodes[n];
+    const x1=p.x*cosY+p.z*sinY, z1=-p.x*sinY+p.z*cosY;
+    const y2=p.y*cosX-z1*sinX, z2=p.y*sinX+z1*cosX;
+    const persp=D/(D-z2); p.sx=cx+x1*persp*scale; p.sy=cy-y2*persp*scale; p.persp=persp; }
 
-  // Build the whole wireframe as one path.
-  const path = new Path2D();
-  for (let j=0; j<=LON; j++){                 // longitude lines
-    let s = sp[idx(0,j)]; path.moveTo(s.sx, s.sy);
-    for (let i=1; i<=LAT; i++){ s = sp[idx(i,j)]; path.lineTo(s.sx, s.sy); }
-  }
-  for (let i=0; i<=LAT; i++){                  // latitude rings
-    let s = sp[idx(i,0)]; path.moveTo(s.sx, s.sy);
-    for (let j=1; j<=LON; j++){ s = sp[idx(i,j)]; path.lineTo(s.sx, s.sy); }
-  }
+  // Connections — built into NB colour buckets, ~8 stroke calls total.
+  const paths=[]; for(let i=0;i<NB;i++) paths.push(new Path2D());
+  for(let e=0;e<edges.length;e++){ const ed=edges[e]; const a=nodes[ed.a], b=nodes[ed.b];
+    const pth=paths[ed.bucket]; pth.moveTo(a.sx,a.sy); pth.lineTo(b.sx,b.sy); }
+  ctx.lineWidth=0.8;
+  for(let i=0;i<NB;i++){ const c=mix(cur.c1,cur.c2,i/(NB-1));
+    const flow=0.5+0.5*Math.sin(t*cur.flow+i*0.9);
+    const al=Math.min(0.7,(0.10+0.13*flow)*cur.energy);
+    ctx.strokeStyle=rgba(c,al); ctx.stroke(paths[i]); }
 
-  // Screen-space gradient (left=c1 blue, right=c2 magenta), drawn additively.
-  ctx.globalCompositeOperation = 'lighter';
-  const grad = ctx.createLinearGradient(cx-scale, cy-scale, cx+scale, cy+scale);
-  grad.addColorStop(0, rgba(cur.c1, 0.9)); grad.addColorStop(1, rgba(cur.c2, 0.9));
-  const glowGrad = ctx.createLinearGradient(cx-scale, cy-scale, cx+scale, cy+scale);
-  glowGrad.addColorStop(0, rgba(cur.c1, 0.18*cur.glow)); glowGrad.addColorStop(1, rgba(cur.c2, 0.18*cur.glow));
+  // Nodes — crisp solid dots (no blur).
+  for(let n=0;n<nodes.length;n++){ const p=nodes[n];
+    const breath=0.55+0.45*Math.sin(t*1.6+p.phase);
+    const boost=pulseBoost(p.rad,nowS);
+    const a=Math.min(1,(0.5+0.5*breath)*cur.energy+boost);
+    const r=(1.0+p.sz*0.55)*p.persp*(1+boost*0.5);
+    const c=mix(cur.c1,cur.c2,p.col);
+    ctx.fillStyle=rgba(c,a);
+    ctx.beginPath(); ctx.arc(p.sx,p.sy, r, 0, 6.2832); ctx.fill(); }
 
-  ctx.lineJoin = 'round';
-  ctx.strokeStyle = glowGrad; ctx.lineWidth = 3.0; ctx.stroke(path);   // soft glow pass
-  ctx.strokeStyle = grad;     ctx.lineWidth = 0.9; ctx.stroke(path);   // crisp pass
-
-  // Vertex dots (sparse) + surrounding cloud.
-  ctx.fillStyle = grad;
-  const step = tier >= 1 ? 2 : 1;
-  for (let i=0; i<=LAT; i+=step) for (let j=0; j<=LON; j+=step){
-    const s = sp[idx(i,j)]; ctx.fillRect(s.sx-0.8, s.sy-0.8, 1.6, 1.6);
-  }
-  const ca = 0.5*cur.dots;
-  ctx.fillStyle = rgba(mix(cur.c1, cur.c2, 0.5), ca);
-  for (let n=0; n<cloud.length; n++){
-    const s = project(cloud[n], scale, cx, cy, cosX, sinX, cosY, sinY);
-    ctx.fillRect(s.sx-1, s.sy-1, 2, 2);
-  }
-
-  // Adaptive: if fps stays low, thin the dots then drop DPR.
-  frames++;
-  if(now - fpsT >= 1000){
-    const fps = frames*1000/(now-fpsT); frames=0; fpsT=now;
-    if(fps < 30 && tier < 2){ tier++; if(tier===2 && DPR>1){ DPR=1; resize(); } }
-  }
+  // Adaptive: thin edges, then drop DPR.
+  frames++; if(now-fpsT>=1000){ const fps=frames*1000/(now-fpsT); frames=0; fpsT=now;
+    if(fps<30 && tier<2){ tier++; if(tier===2 && DPR>1){ DPR=1; resize(); } } }
 }
 requestAnimationFrame(frame);
 
 // ── Bridge: Python -> page ──────────────────────────────────────────────────────
 window.patroam = {
-  setState(name){ if(STATES[name]) target = STATES[name]; },
+  setState(name){ if(STATES[name]){ target=STATES[name]; addPulse(); } },
   setStatus(msg){ document.getElementById('status').textContent = msg || ''; },
-  setModels(list){
-    const sel=document.getElementById('model'); sel.innerHTML='';
-    (list&&list.length?list:['(no models)']).forEach(m=>{
-      const o=document.createElement('option'); o.value=o.textContent=m; sel.appendChild(o);
-    });
-  },
+  setModels(list){ const sel=document.getElementById('model'); sel.innerHTML='';
+    (list&&list.length?list:['(no models)']).forEach(m=>{ const o=document.createElement('option'); o.value=o.textContent=m; sel.appendChild(o); }); },
 };
 
 // ── Bridge: page -> Python ────────────────────────────────────────────────────────
-const api = ()=> (window.pywebview && window.pywebview.api) || null;
-const $ = (id)=>document.getElementById(id);
-$('send').onclick = ()=>{ const v=$('text').value.trim(); if(v&&api()){ api().send(v); $('text').value=''; } };
+const api=()=> (window.pywebview && window.pywebview.api) || null;
+const $=(id)=>document.getElementById(id);
+$('send').onclick=()=>{ const v=$('text').value.trim(); if(v&&api()){ api().send(v); $('text').value=''; } };
 $('text').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); $('send').onclick(); } });
-$('model').onchange = ()=>{ api()&&api().set_model($('model').value); };
-$('refresh').onclick = async ()=>{ if(api()){ const m=await api().get_models(); window.patroam.setModels(m); } };
-
+$('model').onchange=()=>{ api()&&api().set_model($('model').value); };
+$('refresh').onclick=async()=>{ if(api()){ const m=await api().get_models(); window.patroam.setModels(m); } };
 let ttsOn=true;
-$('tts').onclick = ()=>{ ttsOn=!ttsOn; $('tts').classList.toggle('on',ttsOn); api()&&api().set_tts(ttsOn); };
-
+$('tts').onclick=()=>{ ttsOn=!ttsOn; $('tts').classList.toggle('on',ttsOn); api()&&api().set_tts(ttsOn); };
 const mic=$('mic');
 const press=()=>{ api()&&api().record_start(); mic.classList.add('rec'); mic.textContent='● Rec'; };
 const release=()=>{ if(!mic.classList.contains('rec'))return; mic.classList.remove('rec'); mic.textContent='🎙 Hold'; api()&&api().record_stop(); };
-mic.addEventListener('mousedown', press); mic.addEventListener('mouseup', release); mic.addEventListener('mouseleave', release);
-mic.addEventListener('touchstart', e=>{e.preventDefault();press();}); mic.addEventListener('touchend', e=>{e.preventDefault();release();});
-
+mic.addEventListener('mousedown',press); mic.addEventListener('mouseup',release); mic.addEventListener('mouseleave',release);
+mic.addEventListener('touchstart',e=>{e.preventDefault();press();}); mic.addEventListener('touchend',e=>{e.preventDefault();release();});
 let wakeOn=false;
-$('wake').onclick = async ()=>{
-  if(!api())return; wakeOn = await api().toggle_always_on();
-  $('wake').classList.toggle('on', wakeOn);
-  $('wake').textContent = wakeOn ? '👂 Always-on' : '😴 Always-on';
-  mic.disabled = wakeOn; mic.style.opacity = wakeOn ? .4 : 1;
-};
-
-function boot(){
-  const a=api(); if(!a){ setTimeout(boot, 120); return; }
-  a.ready().then(info=>{
-    if(!info) return;
-    window.patroam.setModels(info.models||[]);
-    ttsOn = info.tts!==false; $('tts').classList.toggle('on', ttsOn);
-    if(info.state) window.patroam.setState(info.state);
-  });
-}
+function applyWake(on){ wakeOn=on; $('wake').classList.toggle('on',on);
+  $('wake').textContent = on?'👂 Always-on':'😴 Always-on';
+  mic.disabled=on; mic.style.opacity=on?.4:1; }
+window.patroam.setWake = applyWake;   // Python pushes the auto-start state here
+$('wake').onclick=async()=>{ if(!api())return; applyWake(await api().toggle_always_on()); };
+function boot(){ const a=api(); if(!a){ setTimeout(boot,120); return; }
+  a.ready().then(info=>{ if(!info)return; window.patroam.setModels(info.models||[]);
+    ttsOn=info.tts!==false; $('tts').classList.toggle('on',ttsOn); if(info.state) window.patroam.setState(info.state); }); }
 window.addEventListener('pywebviewready', boot);
 setTimeout(boot, 400);
 </script>

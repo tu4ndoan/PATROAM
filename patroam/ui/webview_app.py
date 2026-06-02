@@ -65,6 +65,9 @@ class Controller:
     def set_status(self, msg):
         self._eval(f"window.patroam.setStatus({json.dumps(msg)})")
 
+    def push_wake(self, on):
+        self._eval(f"window.patroam.setWake({json.dumps(bool(on))})")
+
     # ── state helpers ───────────────────────────────────────────────────────
     def resting_state(self):
         if self.listener and self.listener.listening:
@@ -127,13 +130,7 @@ class Controller:
         self.agent.send(text, lambda t: None, on_done, on_error)
 
     # ── always-on ─────────────────────────────────────────────────────────────
-    def toggle_always_on(self):
-        if self.listener and self.listener.listening:
-            self.listener.stop()
-            self.session_active = False
-            self.set_status("always-on off")
-            self.set_state("idle")
-            return False
+    def _ensure_listener(self):
         if not self.listener:
             self.listener = WakeWordListener(
                 on_command=self.handle,
@@ -141,14 +138,37 @@ class Controller:
                 on_wake=self._on_wake,
                 on_sleep=self._on_sleep,
             )
+
+    def start_listening(self):
+        self._ensure_listener()
         try:
             self.listener.start()
         except Exception as e:
             self.set_status(f"mic error: {e}")
+            self.push_wake(False)
             return False
         self.session_active = False
         self.set_state("sleeping")
+        self.push_wake(True)
         return True
+
+    def stop_listening(self):
+        if self.listener:
+            self.listener.stop()
+        self.session_active = False
+        self.set_status("always-on off")
+        self.set_state("idle")
+        self.push_wake(False)
+
+    def toggle_always_on(self):
+        if self.listener and self.listener.listening:
+            self.stop_listening()
+            return False
+        return self.start_listening()
+
+    def autostart(self):
+        """Turn always-on on automatically (mic warm-up runs off-thread)."""
+        threading.Thread(target=self.start_listening, daemon=True).start()
 
     def _on_wake(self):
         self.session_active = True
@@ -212,11 +232,14 @@ class JsApi:
     def ready(self):
         """Called once the page is loaded. Returns the initial payload."""
         self.c._ready = True
-        return {
+        payload = {
             "models": self.c.list_models(),
             "tts": self.c.tts_enabled,
             "state": self.c.resting_state(),
         }
+        # Always-on by default — start listening as soon as the UI is up.
+        self.c.autostart()
+        return payload
 
     def send(self, text):
         threading.Thread(target=self.c.handle, args=(text,), daemon=True).start()
