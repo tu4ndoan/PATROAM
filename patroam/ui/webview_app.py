@@ -11,9 +11,9 @@ import os
 import queue
 import threading
 
-from .. import skills
+from .. import config, skills
 from ..agent import Agent
-from ..providers import OllamaProvider
+from ..providers import make_provider, pick_default
 from ..voice.listener import WakeWordListener
 from ..voice.recorder import VoiceRecorder
 from ..voice.tts import TTSWorker
@@ -25,7 +25,7 @@ class Controller:
     """All of PATROAM's behaviour, independent of the rendering layer."""
 
     def __init__(self, provider=None):
-        self.agent = Agent(provider or OllamaProvider())
+        self.agent = Agent(provider or make_provider())
         self.tts = TTSWorker()
         self.tts.start()
         self.recorder = VoiceRecorder()
@@ -36,6 +36,10 @@ class Controller:
 
         self.window = None
         self._ready = False
+        self._speaking = False
+        self._speaking_text = ""
+        self._pending = 0
+        self._buf = ""
         # Push JS updates from a dedicated thread so we never call evaluate_js
         # re-entrantly from inside an incoming API call.
         self._jsq = queue.Queue()
@@ -68,6 +72,22 @@ class Controller:
     def push_wake(self, on):
         self._eval(f"window.patroam.setWake({json.dumps(bool(on))})")
 
+    # ── chat panel push ─────────────────────────────────────────────────────────
+    def _chat_user(self, text):
+        self._eval(f"window.patroam.chatUser({json.dumps(text)})")
+
+    def _chat_token(self, text):
+        self._eval(f"window.patroam.chatToken({json.dumps(text)})")
+
+    def _chat_done(self, text):
+        self._eval(f"window.patroam.chatDone({json.dumps(text)})")
+
+    def greet(self):
+        """Speak a time-of-day greeting and log it (used on startup and on wake)."""
+        g = config.time_greeting()
+        self._chat_done(g)
+        self.speak(g)
+
     # ── state helpers ───────────────────────────────────────────────────────
     def resting_state(self):
         if self.listener and self.listener.listening:
@@ -77,32 +97,73 @@ class Controller:
     def rest(self):
         self.set_state(self.resting_state())
 
-    # ── speaking (with self-hearing guard) ───────────────────────────────────
-    def speak(self, text):
+    # ── speaking (streamed chunks; barge-in: keep listening, filter echo) ──────
+    def _set_busy(self, busy):
+        if self.listener:
+            self.listener.set_busy(busy)
+
+    def _say_chunk(self, text):
+        text = text.strip()
+        if not text:
+            return
         if not self.tts_enabled:
+            self._set_busy(False)
             self.rest()
             return
-        self.set_state("speaking")
-        listening = bool(self.listener and self.listener.listening)
-        if listening:
-            self.listener.pause()
+        if self._pending == 0:
+            self.set_state("speaking")
+            self._set_busy(True)          # keep the session alive while speaking
+        self._speaking = True
+        self._pending += 1
+        self._speaking_text = (self._speaking_text + " " + text)[-400:]
 
         def finished():
-            if listening:
-                self.listener.resume()
-            self.rest()
+            self._pending -= 1
+            if self._pending <= 0:
+                self._pending = 0
+                self._speaking = False
+                self._set_busy(False)     # speech done — restart the silence timer
+                self.rest()
 
         self.tts.speak(text, on_finish=finished)
+
+    def _flush_sentences(self):
+        while True:
+            chunk, self._buf = config.next_speech_chunk(self._buf)
+            if chunk is None:
+                break
+            self._say_chunk(chunk)
+
+    def _flush_rest(self):
+        rest, self._buf = self._buf, ""
+        self._say_chunk(rest)
+
+    def speak(self, text):
+        self._buf = ""
+        self._speaking_text = ""
+        self._say_chunk(text)
 
     # ── request handling ──────────────────────────────────────────────────────
     def handle(self, text):
         text = (text or "").strip()
-        if not text or self.is_responding:
+        if not text:
             return
+        # Barge-in: interrupt a reply in progress when the user speaks anew.
+        if self._speaking:
+            if config.is_echo(self._speaking_text, text):
+                return
+            self.tts.interrupt()
+            self._speaking = False
+            self._pending = 0
+            self._buf = ""
+        if self.is_responding:
+            return
+        self._chat_user(text)
         # Local commands first (e.g. "open Spotify").
         reply = skills.try_handle(text)
         if reply is not None:
             self.set_status(reply)
+            self._chat_done(reply)
             self.speak(reply)
             return
         if not self.agent.model:
@@ -114,20 +175,33 @@ class Controller:
         self.is_responding = True
         self.set_status("thinking…")
         self.set_state("thinking")
+        self._set_busy(True)            # hold the session through thinking + speaking
+        self._buf = ""
+        self._speaking_text = ""
+
+        def on_token(t):
+            self._chat_token(t)
+            self._buf += t
+            self._flush_sentences()     # speak each sentence as soon as it's ready
 
         def on_done(full):
             self.is_responding = False
             self.set_status("")
-            self.speak(full)
+            self._chat_done(full)
+            self._flush_rest()
+            if self._pending == 0:      # nothing was spoken (e.g. empty/tts off)
+                self._set_busy(False)
+                self.rest()
 
         def on_error(err):
             self.is_responding = False
             self.set_status(f"error: {err}")
+            self._set_busy(False)
             self.rest()
 
         # Provider callbacks fire on a worker thread; pushing JS from there is
         # fine (it goes through the pump thread).
-        self.agent.send(text, lambda t: None, on_done, on_error)
+        self.agent.send(text, on_token, on_done, on_error)
 
     # ── always-on ─────────────────────────────────────────────────────────────
     def _ensure_listener(self):
@@ -137,6 +211,7 @@ class Controller:
                 on_status=self.set_status,
                 on_wake=self._on_wake,
                 on_sleep=self._on_sleep,
+                on_greet=self._greet,
             )
 
     def start_listening(self):
@@ -175,6 +250,9 @@ class Controller:
         self.set_status("listening…")
         self.set_state("listening")
 
+    def _greet(self):
+        self.greet()   # time-of-day greeting on wake
+
     def _on_sleep(self):
         self.session_active = False
         self.set_status('asleep — say "hey patroam"')
@@ -206,7 +284,7 @@ class Controller:
     def list_models(self):
         models = self.agent.provider.list_models()
         if models and (not self.agent.model or self.agent.model not in models):
-            self.agent.set_model(models[0])
+            self.agent.set_model(pick_default(models))
         return models
 
     def set_model(self, name):
@@ -224,44 +302,62 @@ class Controller:
 
 
 class JsApi:
-    """Methods exposed to JavaScript as window.pywebview.api.*"""
+    """Methods exposed to JavaScript as window.pywebview.api.*
+
+    IMPORTANT: the controller reference is underscore-prefixed (`_c`). pywebview
+    serializes the *public* attributes of the js_api object to expose them to JS;
+    a public reference to the Controller would lead it into the pywebview window
+    (a .NET object) and recurse forever on `SyncRoot` ("maximum recursion depth
+    exceeded"). Keeping it private avoids that. All exposed members below are
+    methods returning only plain JSON types.
+    """
 
     def __init__(self, controller):
-        self.c = controller
+        self._c = controller
 
     def ready(self):
-        """Called once the page is loaded. Returns the initial payload."""
-        self.c._ready = True
+        """Called when the page is loaded. Idempotent — the page may call this
+        more than once (event + fallback), but we only start listening and greet
+        once."""
+        first = not self._c._ready
+        self._c._ready = True
         payload = {
-            "models": self.c.list_models(),
-            "tts": self.c.tts_enabled,
-            "state": self.c.resting_state(),
+            "models": self._c.list_models(),
+            "tts": self._c.tts_enabled,
+            "state": self._c.resting_state(),
         }
-        # Always-on by default — start listening as soon as the UI is up.
-        self.c.autostart()
+        if first:
+            # Always-on by default — start listening as soon as the UI is up.
+            self._c.autostart()
+            # Greet the user on launch, based on time of day (once).
+            threading.Timer(0.6, self._c.greet).start()
         return payload
 
     def send(self, text):
-        threading.Thread(target=self.c.handle, args=(text,), daemon=True).start()
+        threading.Thread(target=self._c.handle, args=(text,), daemon=True).start()
         return True
 
     def toggle_always_on(self):
-        return self.c.toggle_always_on()
+        return bool(self._c.toggle_always_on())
 
     def record_start(self):
-        self.c.record_start()
+        self._c.record_start()
+        return True
 
     def record_stop(self):
-        self.c.record_stop()
+        self._c.record_stop()
+        return True
 
     def get_models(self):
-        return self.c.list_models()
+        return self._c.list_models()
 
     def set_model(self, name):
-        self.c.set_model(name)
+        self._c.set_model(name)
+        return True
 
     def set_tts(self, on):
-        self.c.set_tts(on)
+        self._c.set_tts(on)
+        return True
 
 
 def run(provider=None):

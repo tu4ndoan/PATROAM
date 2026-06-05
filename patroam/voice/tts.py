@@ -53,6 +53,12 @@ class Pyttsx3Engine:
         self.engine.say(text)
         self.engine.runAndWait()
 
+    def interrupt(self):
+        try:
+            self.engine.stop()
+        except Exception:
+            pass
+
     def shutdown(self):
         try:
             self.engine.stop()
@@ -111,6 +117,14 @@ class EdgeTTSEngine:
                 self._fallback = Pyttsx3Engine()
             self._fallback.speak(text)
 
+    def interrupt(self):
+        try:
+            self._pygame.mixer.music.stop()
+        except Exception:
+            pass
+        if self._fallback:
+            self._fallback.interrupt()
+
     def shutdown(self):
         try:
             self._pygame.mixer.quit()
@@ -162,6 +176,19 @@ class TTSWorker(threading.Thread):
         """Queue text to be spoken. `on_finish` (if given) runs on the TTS thread
         once this utterance finishes."""
         self.queue.put((text, on_finish))
+
+    def interrupt(self):
+        """Stop the current utterance and drop any queued ones (for barge-in)."""
+        try:
+            while True:
+                self.queue.get_nowait()
+        except queue.Empty:
+            pass
+        if self.engine and hasattr(self.engine, "interrupt"):
+            try:
+                self.engine.interrupt()
+            except Exception:
+                pass
 
     def stop(self):
         self.queue.put(None)

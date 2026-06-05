@@ -10,9 +10,9 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
-from .. import skills
+from .. import config, skills
 from ..agent import Agent
-from ..providers import OllamaProvider
+from ..providers import make_provider, pick_default
 from ..voice.listener import WakeWordListener
 from ..voice.recorder import VoiceRecorder
 from ..voice.tts import TTSWorker
@@ -37,7 +37,7 @@ class PatroamChat(tk.Tk):
         self.minsize(420, 460)
         self.configure(bg=self.DARK_BG)
 
-        self.agent = Agent(provider or OllamaProvider())
+        self.agent = Agent(provider or make_provider())
         self.is_responding = False
         self.recorder = VoiceRecorder()
         self.is_recording = False
@@ -139,6 +139,9 @@ class PatroamChat(tk.Tk):
         self._session_active = False
         self._set_status('asleep — say "hey patroam"')
         self._rest()
+
+    def _greet(self):
+        self._speak(config.greeting())
 
     def _set_status(self, msg, error=False):
         self.status_var.set(msg)
@@ -258,6 +261,7 @@ class PatroamChat(tk.Tk):
                 on_status=lambda s: self.after(0, self._set_status, s),
                 on_wake=lambda: self.after(0, self._on_wake),
                 on_sleep=lambda: self.after(0, self._on_sleep),
+                on_greet=lambda: self.after(0, self._greet),
             )
         try:
             self.listener.start()
@@ -283,7 +287,7 @@ class PatroamChat(tk.Tk):
         if models:
             self.model_box["values"] = models
             if not self.model_var.get() or self.model_var.get() not in models:
-                self.model_var.set(models[0])
+                self.model_var.set(pick_default(models))
             self.agent.set_model(self.model_var.get())
             self._set_status(f"{len(models)} model(s) ready")
         else:

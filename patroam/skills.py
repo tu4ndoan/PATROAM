@@ -18,6 +18,8 @@ import threading
 import time
 import webbrowser
 
+from .memory import get_memory
+
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 
@@ -29,6 +31,19 @@ MUSIC_RE = re.compile(
     r"\b(play|put on|start|throw on)\b.*\b(music|song|songs|tunes|playlist|spotify|liked)\b",
     re.I)
 LIKED_SONGS_URI = "spotify:collection:tracks"
+
+# Memory voice commands (reliable, no model needed).
+REMEMBER_RE = re.compile(r"^\s*(?:please\s+)?(?:remember|note|keep in mind)\b(?:\s+that)?\s+(.+)", re.I)
+FORGET_RE = re.compile(r"^\s*forget\b(?:\s+that|\s+about)?\s+(.+)", re.I)
+RECALL_RE = re.compile(r"\bwhat do you (?:know|remember)(?:\s+about me)?\b", re.I)
+
+# Ad-stats command — needs both an "ad" word and a stats/question word.
+ADS_RE = re.compile(r"\b(ads?|advert\w*|campaigns?)\b", re.I)
+ADS_CTX_RE = re.compile(r"\b(doing|stats|statistics|performance|results?|spend|spending|"
+                        r"ctr|impressions?|clicks?|reach|how|numbers?|metrics?|report)\b", re.I)
+
+# News command ("what's up", "what's new", "news", "headlines", …).
+NEWS_RE = re.compile(r"\b(what'?s up|what'?s new|what is up|news|headlines|catch me up)\b", re.I)
 
 # Words to strip from a spoken app name ("open the spotify app please" -> spotify)
 _FILLER = {
@@ -249,6 +264,28 @@ def _addr():
 
 def try_handle(text):
     """Handle `text` as a system command. Returns a spoken reply, or None."""
+    # Memory commands first.
+    m = REMEMBER_RE.match(text)
+    if m:
+        get_memory().add_fact(m.group(1).strip().rstrip(".!?"))
+        return f"Noted{_addr()}. I'll remember that."
+    m = FORGET_RE.match(text)
+    if m:
+        n = get_memory().forget(m.group(1).strip())
+        return f"Done{_addr()}." if n else "I didn't have anything matching that."
+    if RECALL_RE.search(text):
+        return get_memory().summary()
+
+    # Ad stats (direct Meta API — reliable on any model).
+    if ADS_RE.search(text) and ADS_CTX_RE.search(text):
+        from . import meta_ads
+        return meta_ads.summary(text)
+
+    # Latest news (NewsAPI).
+    if NEWS_RE.search(text):
+        from . import news
+        return news.headlines(text)
+
     if MUSIC_RE.search(text):
         play_music()
         return f"Putting on your Liked Songs{_addr()}."

@@ -26,12 +26,14 @@ from .. import config
 
 class WakeWordListener:
     def __init__(self, on_command, on_status=None, on_wake=None, on_sleep=None,
-                 recognize=None, session_timeout=None):
+                 on_greet=None, recognize=None, session_timeout=None):
         """
         on_command(text): called with a command to execute.
         on_status(msg):    optional, human-readable status updates.
         on_wake():         optional, called when a session opens.
         on_sleep():        optional, called when a session ends.
+        on_greet():        optional, called when woken WITHOUT a command (a good
+                           moment for a spoken greeting / acknowledgement).
         recognize(audio):  optional custom transcriber; defaults to Google STT.
         session_timeout:   seconds of silence before the session closes
                            (defaults to config.SESSION_TIMEOUT; 0/None = never).
@@ -40,6 +42,7 @@ class WakeWordListener:
         self.on_status = on_status or (lambda s: None)
         self.on_wake = on_wake or (lambda: None)
         self.on_sleep = on_sleep or (lambda: None)
+        self.on_greet = on_greet or (lambda: None)
         self._recognize = recognize
         self.session_timeout = (config.SESSION_TIMEOUT
                                 if session_timeout is None else session_timeout)
@@ -51,6 +54,7 @@ class WakeWordListener:
         self._active = False         # in a conversation session
         self._active_until = 0.0     # session expiry timestamp
         self._paused = False         # ignore audio (e.g. while speaking)
+        self._busy = False           # responding/speaking — don't let the session lapse
         self._watchdog = None
         self.listening = False
 
@@ -92,7 +96,8 @@ class WakeWordListener:
 
         with self._lock:
             active = self._active
-            if active and self.session_timeout and time.time() > self._active_until:
+            if (active and self.session_timeout and not self._busy
+                    and time.time() > self._active_until):
                 # Session lapsed during the silence before this phrase.
                 self._active = False
                 active = False
@@ -134,6 +139,7 @@ class WakeWordListener:
         if command:
             self.on_command(command)
         else:
+            self.on_greet()
             self.on_status("Listening — go ahead, no need to say it again.")
 
     # ── watchdog (closes idle sessions even without new speech) ─────────────────
@@ -143,7 +149,9 @@ class WakeWordListener:
             if not self.session_timeout:
                 continue
             with self._lock:
-                lapsed = self._active and time.time() > self._active_until
+                # Never lapse while PATROAM is busy responding/speaking.
+                lapsed = (self._active and not self._busy
+                          and time.time() > self._active_until)
                 if lapsed:
                     self._close_session()
             if lapsed:
@@ -157,6 +165,15 @@ class WakeWordListener:
     def resume(self):
         """Resume reacting to audio."""
         self._paused = False
+
+    def set_busy(self, busy):
+        """Hold the conversation session open while responding/speaking. When
+        released, the silence countdown restarts from now."""
+        with self._lock:
+            self._busy = bool(busy)
+            if busy:
+                self._active = True
+            self._touch()   # restart the timer (and keep session alive)
 
     def start(self):
         if self.listening:

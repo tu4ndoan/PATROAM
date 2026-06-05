@@ -41,6 +41,24 @@
   #text:focus { border-color:var(--accent); }
   #send { background:var(--accent); border-color:var(--accent); color:#fff; }
   .hint { position:absolute; left:20px; bottom:26px; color:var(--muted); font-size:11px; opacity:.55; }
+
+  /* Side chat panel */
+  .chat { position:fixed; top:0; right:0; height:100%; width:340px; max-width:82vw;
+    background:rgba(10,8,18,.85); border-left:1px solid rgba(150,130,230,.2);
+    backdrop-filter:blur(12px); transform:translateX(0); transition:transform .25s ease;
+    display:flex; flex-direction:column; z-index:5; }
+  .chat.hidden { transform:translateX(100%); }
+  .chat-head { padding:14px 16px; font-weight:bold; color:#9aa8ff; letter-spacing:1px;
+    border-bottom:1px solid rgba(150,130,230,.15); display:flex; justify-content:space-between; }
+  .chat-head .x { cursor:pointer; opacity:.7; }
+  .chat-log { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:8px; }
+  .msg { padding:8px 11px; border-radius:10px; font-size:13px; line-height:1.45;
+    max-width:100%; white-space:pre-wrap; word-wrap:break-word; }
+  .msg.you { align-self:flex-end; background:rgba(79,142,247,.18); border:1px solid rgba(79,142,247,.35); }
+  .msg.bot { align-self:flex-start; background:rgba(123,92,255,.16); border:1px solid rgba(123,92,255,.3); }
+  .msg .who { display:block; font-size:10px; opacity:.6; margin-bottom:2px; }
+  body.chat-open .bar { transform:translateX(calc(-50% - 175px)); transition:transform .25s ease; }
+  @media (max-width:640px){ body.chat-open .bar { transform:translateX(-50%); } }
 </style>
 </head>
 <body>
@@ -48,8 +66,13 @@
   <div id="ui">
     <div class="brand">⬡ PATROAM</div>
     <div class="top-right">
+      <span id="chatToggle" class="glass iconbtn" title="Show/hide chat">💬</span>
       <select id="model" class="glass" title="Model"></select>
       <span id="refresh" class="glass iconbtn" title="Refresh models">⟳</span>
+    </div>
+    <div id="chat" class="chat hidden">
+      <div class="chat-head"><span>Conversation</span><span class="x" id="chatClose">✕</span></div>
+      <div id="log" class="chat-log"></div>
     </div>
     <div id="status" class="status"></div>
     <div class="hint">drag to rotate · scroll to zoom · click to pulse</div>
@@ -208,12 +231,28 @@ function frame(now){
 }
 requestAnimationFrame(frame);
 
+// ── Chat panel ────────────────────────────────────────────────────────────────
+const logEl=document.getElementById('log');
+let curBot=null;
+function addMsg(who,text,cls){ const d=document.createElement('div'); d.className='msg '+cls;
+  const w=document.createElement('span'); w.className='who'; w.textContent=who; d.appendChild(w);
+  const t=document.createTextNode(text||''); d.appendChild(t); d._t=t;
+  logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; return d; }
+function toggleChat(show){ const c=document.getElementById('chat');
+  const open=show===undefined?c.classList.contains('hidden'):show;
+  c.classList.toggle('hidden',!open); document.body.classList.toggle('chat-open',open); }
+document.getElementById('chatToggle').onclick=()=>toggleChat();
+document.getElementById('chatClose').onclick=()=>toggleChat(false);
+
 // ── Bridge: Python -> page ──────────────────────────────────────────────────────
 window.patroam = {
   setState(name){ if(STATES[name]){ target=STATES[name]; addPulse(); } },
   setStatus(msg){ document.getElementById('status').textContent = msg || ''; },
   setModels(list){ const sel=document.getElementById('model'); sel.innerHTML='';
     (list&&list.length?list:['(no models)']).forEach(m=>{ const o=document.createElement('option'); o.value=o.textContent=m; sel.appendChild(o); }); },
+  chatUser(text){ addMsg('You', text, 'you'); },
+  chatToken(text){ if(!curBot) curBot=addMsg('PATROAM','','bot'); curBot._t.textContent+=text; logEl.scrollTop=logEl.scrollHeight; },
+  chatDone(text){ if(curBot){ if(text) curBot._t.textContent=text; } else { addMsg('PATROAM', text||'', 'bot'); } curBot=null; },
 };
 
 // ── Bridge: page -> Python ────────────────────────────────────────────────────────
@@ -236,7 +275,9 @@ function applyWake(on){ wakeOn=on; $('wake').classList.toggle('on',on);
   mic.disabled=on; mic.style.opacity=on?.4:1; }
 window.patroam.setWake = applyWake;   // Python pushes the auto-start state here
 $('wake').onclick=async()=>{ if(!api())return; applyWake(await api().toggle_always_on()); };
-function boot(){ const a=api(); if(!a){ setTimeout(boot,120); return; }
+let booted=false;
+function boot(){ if(booted)return; const a=api(); if(!a){ setTimeout(boot,120); return; }
+  booted=true;
   a.ready().then(info=>{ if(!info)return; window.patroam.setModels(info.models||[]);
     ttsOn=info.tts!==false; $('tts').classList.toggle('on',ttsOn); if(info.state) window.patroam.setState(info.state); }); }
 window.addEventListener('pywebviewready', boot);

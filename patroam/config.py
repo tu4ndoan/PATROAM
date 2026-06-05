@@ -4,20 +4,63 @@ Anything that might change per-machine or per-user lives here so the rest of
 the package never hardcodes paths, URLs, or the agent's persona.
 """
 
+import json
 import os
+import random
+import re
 import tempfile
+from datetime import datetime
+
+
+def _load_secrets():
+    """Load secrets from ~/.patroam/secrets.json into the environment (without
+    overriding real env vars). Keeps API keys/tokens OUT of tracked source."""
+    path = os.path.join(os.path.expanduser("~"), ".patroam", "secrets.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if v not in (None, ""):
+                os.environ.setdefault(k, str(v))
+
+
+_load_secrets()
 
 # ── Backend ──────────────────────────────────────────────────────────────────
 OLLAMA_URL = os.environ.get("PATROAM_OLLAMA_URL", "http://localhost:11434")
 
+# Preferred model to start on (must be one the router offers, e.g. a local
+# Ollama model or a Claude model like "claude-opus-4-8"). Empty = first listed.
+# Claude models also need ANTHROPIC_API_KEY set in the environment.
+DEFAULT_MODEL = os.environ.get("PATROAM_MODEL", "")
+
+# ── Meta Ads (direct API — for the "how are my ads doing" command) ──────────────
+# A Meta access token with `ads_read` (a non-expiring System User token is best)
+# and your ad-account id (numeric, no "act_" prefix). No OAuth needed.
+META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
+META_AD_ACCOUNT_ID = os.environ.get("META_AD_ACCOUNT_ID", "")
+META_API_VERSION = os.environ.get("META_API_VERSION", "v21.0")
+
+# ── News (NewsAPI — for the "what's up" command) ────────────────────────────────
+# Free key from https://newsapi.org. Country is a NewsAPI top-headlines code.
+NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY", "c1af580a08f24022bfa1c29743b48f71")
+NEWS_COUNTRY = os.environ.get("PATROAM_NEWS_COUNTRY", "us")
+
 # ── Voice / wake word ──────────────────────────────────────────────────────────
-# Canonical wake word + the way speech-to-text commonly mishears it.
-WAKE_WORD = "patroam"
-WAKE_WORD_VARIANTS = [
-    "patroam", "patrom", "patroum", "patroan", "patriam",
-    "patron", "patrolam", "pat rome", "petroam", "patram",
+# Any of these phrases wakes PATROAM. Include the common speech-to-text
+# mishearings (e.g. "patron" for "patroam", "pea/pee" for the letter P).
+# NOTE: keep this roughly in sync with WAKE_PHRASES in web/static/app.js.
+WAKE_PHRASES = [
+    "patroam", "hey patroam",
+    "patrom", "patroum", "patroan", "patriam", "patron", "petroam", "patram",
+    "hey bro", "hey dude",
+    "hey agent p", "agent p", "hey agent pea", "agent pea",
+    "hey p", "hey pea", "hey pee", "hey peep",
 ]
-# How close a heard token must be to "patroam" to count as the wake word (0–1).
+# How close a heard phrase must be to a wake phrase to count (0–1).
 WAKE_WORD_FUZZ = 0.78
 
 # Conversation session: after the wake word, PATROAM stays awake and treats every
@@ -37,6 +80,33 @@ STOP_PHRASES = [
 # (the original /tmp/... path only existed on Unix).
 VOICE_TMP_WAV = os.path.join(tempfile.gettempdir(), "patroam_voice_input.wav")
 TTS_TMP_MP3 = os.path.join(tempfile.gettempdir(), "patroam_tts.mp3")
+
+# ── Memory ─────────────────────────────────────────────────────────────────────
+# Persistent across restarts (the practical form of "learning"). Override with
+# PATROAM_MEMORY_FILE.
+MEMORY_FILE = os.environ.get(
+    "PATROAM_MEMORY_FILE",
+    os.path.join(os.path.expanduser("~"), ".patroam", "memory.json"))
+
+# ── MCP connectors ──────────────────────────────────────────────────────────────
+# A JSON file listing MCP servers to connect to, giving PATROAM external tools
+# (e.g. the Meta Ads connector). Format: {"servers": [ {server}, ... ]} where each
+# server is either stdio: {"name","command","args"?,"env"?} or remote:
+# {"name","url","transport":"http"|"sse","headers"?}. Missing file = no MCP.
+MCP_FILE = os.environ.get(
+    "PATROAM_MCP_FILE",
+    os.path.join(os.path.expanduser("~"), ".patroam", "mcp.json"))
+
+
+def load_mcp_servers():
+    try:
+        with open(MCP_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return []
+    if isinstance(data, dict):
+        data = data.get("servers", [])
+    return data if isinstance(data, list) else []
 
 # ── Text-to-speech ─────────────────────────────────────────────────────────────
 # "edge"    : Microsoft Edge neural voices — natural, human-like, needs internet.
@@ -60,13 +130,61 @@ TTS_PYTTSX3_RATE = 170
 
 # ── Persona ──────────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = (
-    "You are PATROAM, the personal assistant to your user. You have the manner of "
-    "a refined, warm, quietly witty British gentleman — think a trusted butler or "
-    "valet. Only occasionally address the user as \"Master\" or \"Sir\" — perhaps "
-    "once every few replies, when greeting, confirming a task, or signing off — and "
-    "the rest of the time simply speak naturally without any honorific. Never use an "
-    "honorific more than once in a reply, and don't force it into every message. "
-    "Speak conversationally the way a real person speaks aloud: use contractions, an "
-    "easy rhythm, and keep replies short and to the point, since they are read "
-    "aloud. Be courteous and characterful, never robotic or verbose."
+    "You are PATROAM, the user's personal AI assistant — a refined, warm, quietly "
+    "witty British gentleman, like a trusted butler or valet who knows them well. "
+    "You have a persistent memory of the user (shown below) and can take actions on "
+    "their computer; use both to be genuinely helpful and personal. Draw on what you "
+    "remember to tailor your help, and proactively save new things they tell you "
+    "about themselves. "
+    "Only occasionally address the user as \"Master\" or \"Sir\" — perhaps once "
+    "every few replies, when greeting, confirming a task, or signing off — and the "
+    "rest of the time speak naturally without any honorific; never more than once in "
+    "a reply. "
+    "Speak conversationally, the way a person speaks aloud: contractions, an easy "
+    "rhythm, short and to the point since replies are read aloud. Be courteous and "
+    "characterful, never robotic or verbose. If you don't know something, say so "
+    "briefly rather than guessing."
 )
+
+# Spoken when woken by the wake word with no command (a short acknowledgement).
+GREETINGS = [
+    "Hello.", "Yes?", "Yes, Master?", "At your service.", "At your service, Sir.",
+    "How can I help?", "I'm listening.", "Hello there.", "Mm-hm?", "Yes, Sir?",
+]
+
+
+def greeting():
+    return random.choice(GREETINGS)
+
+
+def time_greeting():
+    """A greeting based on the time of day: morning / afternoon / evening."""
+    h = datetime.now().hour
+    part = "Good morning" if h < 12 else "Good afternoon" if h < 18 else "Good evening"
+    return f"{part}, Sir."
+
+
+def next_speech_chunk(buf):
+    """Pull the next speakable chunk off the front of a streaming buffer.
+
+    Returns (chunk, rest). Breaks at sentence ends (. ! ? newline) always, and at
+    a clause boundary (, ; :) once the chunk is long enough — so PATROAM starts
+    talking at the first natural pause instead of waiting for a full sentence.
+    """
+    for i, c in enumerate(buf):
+        if c in ".!?\n" or (c in ",;:" and i >= 14):
+            return buf[:i + 1], buf[i + 1:]
+    return None, buf
+
+
+def is_echo(spoken, heard):
+    """True if `heard` is likely PATROAM hearing its own `spoken` reply (used to
+    avoid self-triggering barge-in). Compares word overlap."""
+    def toks(s):
+        return re.sub(r"[^a-z0-9 ]", " ", (s or "").lower()).split()
+    h = toks(heard)
+    if not h:
+        return True
+    sp = set(toks(spoken))
+    hits = sum(1 for w in h if w in sp)
+    return hits / len(h) >= 0.5

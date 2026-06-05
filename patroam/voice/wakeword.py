@@ -32,17 +32,21 @@ def find_command(text: str):
         return None
 
     tokens = norm.split()
-    variants = {v.replace(" ", "") for v in config.WAKE_WORD_VARIANTS}
     n = len(tokens)
+    # Each wake phrase as a list of tokens; try longer phrases first so
+    # "hey patroam" wins over bare "patroam".
+    phrases = [p.split() for p in (_normalize(x) for x in config.WAKE_PHRASES) if p]
+    phrases.sort(key=len, reverse=True)
 
-    for start in range(n):
-        acc = ""
-        # The wake word may be split across up to 3 STT tokens ("pat rome a").
-        for end in range(start, min(start + 3, n)):
-            acc += tokens[end]
-            ratio = difflib.SequenceMatcher(None, acc, config.WAKE_WORD).ratio()
-            if acc in variants or ratio >= config.WAKE_WORD_FUZZ:
-                return " ".join(tokens[end + 1:])
+    for i in range(n):
+        for ptoks in phrases:
+            L = len(ptoks)
+            if L == 0 or i + L > n:
+                continue
+            heard = "".join(tokens[i:i + L])
+            want = "".join(ptoks)
+            if heard == want or difflib.SequenceMatcher(None, heard, want).ratio() >= config.WAKE_WORD_FUZZ:
+                return " ".join(tokens[i + L:])
 
     return None
 

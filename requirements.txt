@@ -4,5 +4,12 @@ SpeechRecognition
 # Natural neural British voice (optional — offline SAPI voice is the fallback):
 edge-tts
 pygame
-# WebGL orb window (optional — falls back to the classic Tk window):
+# Desktop orb window (optional — falls back to the classic Tk window):
 pywebview
+# Web mode (python app.py --web) — only needed if you serve PATROAM in a browser:
+fastapi
+uvicorn[standard]
+# Claude/Opus support (optional — needs ANTHROPIC_API_KEY to actually use):
+anthropic
+# MCP connectors (optional — for external tools like the Meta Ads connector):
+mcp

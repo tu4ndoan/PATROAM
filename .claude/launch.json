@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8753", "--directory", "patroam/ui/web"],
       "port": 8753
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8754", "--directory", "patroam/web/static"],
+      "port": 8754
     }
   ]
 }

@@ -1,0 +1,11 @@
+# Never commit secrets
+secrets.json
+.patroam/
+*.token
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
