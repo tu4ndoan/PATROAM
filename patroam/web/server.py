@@ -67,34 +67,31 @@ def create_app(local_voice=False):
             state["voice"].stop()
 
     async def _respond(ws, agent, loop, text):
-        text = (text or "").strip()
-        if not text:
-            return
-        # Local command first (e.g. "open Spotify", "play some music").
-        reply = skills.try_handle(text)
-        if reply is not None:
-            await ws.send_json({"type": "reply", "text": reply})
-            return
+        # Stream a model reply. Cancellable: agent.cancel() (from a "stop") makes
+        # the provider stop, and cancelling this task unblocks the queue wait.
         if not agent.model:
             await ws.send_json({"type": "error", "text": "No model selected. Is Ollama running?"})
             return
-
         q: asyncio.Queue = asyncio.Queue()
         push = lambda kind, val: loop.call_soon_threadsafe(q.put_nowait, (kind, val))
         agent.send(text,
                    lambda t: push("token", t),
                    lambda f: push("done", f),
                    lambda e: push("error", e))
-        while True:
-            kind, val = await q.get()
-            if kind == "token":
-                await ws.send_json({"type": "token", "text": val})
-            elif kind == "done":
-                await ws.send_json({"type": "reply", "text": val})
-                break
-            else:
-                await ws.send_json({"type": "error", "text": val})
-                break
+        try:
+            while True:
+                kind, val = await q.get()
+                if kind == "token":
+                    await ws.send_json({"type": "token", "text": val})
+                elif kind == "done":
+                    await ws.send_json({"type": "reply", "text": val})
+                    break
+                else:
+                    await ws.send_json({"type": "error", "text": val})
+                    break
+        except asyncio.CancelledError:
+            agent.cancel()
+            raise
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket):
@@ -106,12 +103,42 @@ def create_app(local_voice=False):
             agent.set_model(pick_default(models))
         await ws.send_json({"type": "models", "models": models, "current": agent.model})
         loop = asyncio.get_event_loop()
+        current = None  # the in-flight _respond task
+
+        async def cancel_current():
+            agent.cancel()
+            if current and not current.done():
+                current.cancel()
+                try:
+                    await current
+                except Exception:
+                    pass
+
         try:
             while True:
                 data = await ws.receive_json()
                 kind = data.get("type")
                 if kind == "text":
-                    await _respond(ws, agent, loop, data.get("text", ""))
+                    text = (data.get("text", "") or "").strip()
+                    if not text:
+                        continue
+                    # "Stop" cancels any in-flight response and hushes the browser.
+                    if skills.is_stop_speaking(text):
+                        await cancel_current()
+                        await ws.send_json({"type": "stop"})
+                        continue
+                    # A local command (open app, news, ad stats) answers directly.
+                    reply = skills.try_handle(text)
+                    if reply is not None:
+                        if reply:
+                            await ws.send_json({"type": "reply", "text": reply})
+                        else:
+                            await cancel_current()
+                            await ws.send_json({"type": "stop"})
+                        continue
+                    # Otherwise stream a model reply (superseding any running one).
+                    await cancel_current()
+                    current = asyncio.create_task(_respond(ws, agent, loop, text))
                 elif kind == "model":
                     agent.set_model(data.get("name", ""))
                 elif kind == "wake":

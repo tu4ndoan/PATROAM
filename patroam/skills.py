@@ -32,6 +32,11 @@ MUSIC_RE = re.compile(
     re.I)
 LIKED_SONGS_URI = "spotify:collection:tracks"
 
+# "Stop talking" — halt speech immediately and keep listening (whole utterance).
+STOP_SPEAKING_RE = re.compile(
+    r"^\s*(stop|stop talking|stop it|be quiet|quiet|shush|hush|shut up|enough|"
+    r"that'?s enough|cancel|wait|hold on)\s*[.!]?\s*$", re.I)
+
 # Memory voice commands (reliable, no model needed).
 REMEMBER_RE = re.compile(r"^\s*(?:please\s+)?(?:remember|note|keep in mind)\b(?:\s+that)?\s+(.+)", re.I)
 FORGET_RE = re.compile(r"^\s*forget\b(?:\s+that|\s+about)?\s+(.+)", re.I)
@@ -44,6 +49,13 @@ ADS_CTX_RE = re.compile(r"\b(doing|stats|statistics|performance|results?|spend|s
 
 # News command ("what's up", "what's new", "news", "headlines", …).
 NEWS_RE = re.compile(r"\b(what'?s up|what'?s new|what is up|news|headlines|catch me up)\b", re.I)
+
+# Re-index the knowledge base ("index my docs", "reload knowledge", …).
+INGEST_RE = re.compile(r"\b(index|re-?index|ingest|reload|refresh|rebuild|update)\b"
+                       r".{0,20}\b(docs?|documents?|knowledge|files?|notes?|memory base)\b", re.I)
+
+# Knowledge-graph overview ("knowledge graph", "what's connected", …).
+GRAPH_RE = re.compile(r"\b(knowledge graph|what'?s connected|show.{0,15}(connections|graph))\b", re.I)
 
 # Words to strip from a spoken app name ("open the spotify app please" -> spotify)
 _FILLER = {
@@ -262,8 +274,21 @@ def _addr():
     return random.choice([", Master", ", Sir"]) if random.random() < 0.3 else ""
 
 
+def is_stop_speaking(text):
+    """True if the whole utterance is a 'stop' command (halt speech/generation)."""
+    return bool(STOP_SPEAKING_RE.match(text or ""))
+
+
 def try_handle(text):
-    """Handle `text` as a system command. Returns a spoken reply, or None."""
+    """Handle `text` as a system command.
+
+    Returns: a spoken reply string, "" if handled but nothing should be spoken
+    (e.g. "stop"), or None if not a command (fall through to the model).
+    """
+    # "Stop" — handled silently; the caller has already interrupted any speech.
+    if STOP_SPEAKING_RE.match(text):
+        return ""
+
     # Memory commands first.
     m = REMEMBER_RE.match(text)
     if m:
@@ -275,6 +300,21 @@ def try_handle(text):
         return f"Done{_addr()}." if n else "I didn't have anything matching that."
     if RECALL_RE.search(text):
         return get_memory().summary()
+
+    # Knowledge-graph overview.
+    if GRAPH_RE.search(text):
+        from . import graph
+        return graph.summary()
+
+    # Re-index the user's documents for RAG.
+    if INGEST_RE.search(text):
+        from . import rag
+        n, m = rag.ingest()
+        if not n:
+            return ("I didn't find any documents in your knowledge folder "
+                    "(~/.patroam/knowledge). Drop some in and ask again.")
+        return (f"Indexed {n} passage{'s' if n != 1 else ''} from "
+                f"{m} document{'s' if m != 1 else ''}{_addr()}.")
 
     # Ad stats (direct Meta API — reliable on any model).
     if ADS_RE.search(text) and ADS_CTX_RE.search(text):

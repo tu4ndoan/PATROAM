@@ -35,7 +35,7 @@ def _bootstrap():
     # offline), PATROAM still runs with the offline voice / classic window.
     for module, pkg in [("edge_tts", "edge-tts"), ("pygame", "pygame"),
                         ("webview", "pywebview"), ("anthropic", "anthropic"),
-                        ("mcp", "mcp")]:
+                        ("mcp", "mcp"), ("reportlab", "reportlab")]:
         try:
             __import__(module)
         except ImportError:
@@ -60,9 +60,30 @@ def _start_mcp():
         print(f"MCP startup skipped: {e}")
 
 
+def _start_rag():
+    # Ensure the knowledge folder exists and (re)index it in the background if
+    # there are documents but no index yet.
+    def work():
+        try:
+            from patroam import config, rag
+            import os
+            rag.ensure_dir()
+            has_docs = any(
+                f != "README.txt"
+                for _, _, fs in os.walk(config.KNOWLEDGE_DIR) for f in fs)
+            if has_docs and not os.path.exists(config.RAG_INDEX_FILE):
+                n, m = rag.ingest()
+                if n:
+                    print(f"[rag] indexed {n} passages from {m} documents")
+        except Exception as e:
+            print(f"RAG startup skipped: {e}")
+    threading.Thread(target=work, daemon=True).start()
+
+
 def main():
     _bootstrap()
     #_start_mcp()
+    _start_rag()
     args = sys.argv[1:]
     if "--web" in args:
         for module, pkg in [("fastapi", "fastapi"), ("uvicorn", "uvicorn[standard]")]:

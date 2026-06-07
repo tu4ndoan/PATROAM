@@ -54,7 +54,7 @@ class AnthropicProvider(Provider):
                 msgs.append({"role": m["role"], "content": m["content"]})
         return "\n\n".join(system_parts), msgs
 
-    def stream_chat(self, model, messages, on_token, on_done, on_error):
+    def stream_chat(self, model, messages, on_token, on_done, on_error, cancel=None):
         def worker():
             try:
                 client = self._get_client()
@@ -68,6 +68,8 @@ class AnthropicProvider(Provider):
                     **kwargs,
                 ) as stream:
                     for text in stream.text_stream:
+                        if cancel is not None and cancel.is_set():
+                            return          # aborted: close the stream, no on_done
                         full.append(text)
                         on_token(text)
                 on_done("".join(full))

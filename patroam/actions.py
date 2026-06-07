@@ -13,11 +13,12 @@ own, mid-conversation — rather than only matching fixed phrases.
 import json
 import re
 
-from . import skills
+from . import files, graph, skills
 from .mcp_client import get_mcp
 from .memory import get_memory
 
-_LOCAL = {"remember", "forget", "open_app", "close_app", "play_music"}
+_LOCAL = {"remember", "forget", "open_app", "close_app", "play_music",
+          "write_file", "make_dir", "create_project", "relate"}
 
 _ACTION_RE = re.compile(r"^ACTION:\s*([a-zA-Z_]\w*)\s*(\{.*\})?\s*$", re.M)
 
@@ -38,9 +39,24 @@ def tools_prompt():
         '- open_app {"name": "..."} — open an application on their computer.\n'
         '- close_app {"name": "..."} — close an application.\n'
         "- play_music {} — open Spotify and play their Liked Songs.\n"
+        '- write_file {"path": "...", "content": "..."} — create/overwrite a file '
+        "in the user's workspace (code or documents: .py, .md, .txt, .json, .html, "
+        ".pdf, …). Content is the full file body.\n"
+        '- make_dir {"path": "..."} — create a folder.\n'
+        '- create_project {"name": "...", "files": {"relative/path": "content", …}} '
+        "— scaffold a whole project (a folder with many files) in one action.\n"
+        '- relate {"subject": "...", "relation": "USES|OWNS|DEPENDS_ON|IMPLEMENTS|'
+        'RELATED_TO|BLOCKED_BY", "object": "..."} — record a relationship in the '
+        "knowledge graph (e.g. project X USES technology Y). Use it whenever the user "
+        "reveals how things connect, so you can reason over it later.\n"
         "Rules: keep your spoken reply natural, warm and brief. NEVER read the "
-        "ACTION lines aloud or mention them. Only include ACTION lines when an "
-        "action is actually needed."
+        "ACTION lines aloud or mention them. Only include ACTION lines when needed.\n"
+        "IMPORTANT — when asked to create code, files, an app, or any lengthy output, "
+        "WRITE it to files with write_file / create_project instead of dumping it in "
+        "your reply. Then keep your reply a short summary of what you made and where "
+        "(e.g. \"Done — created todo-app with main.py, README.md and requirements.txt "
+        "in your PATROAM folder.\"). All paths are relative to the user's PATROAM "
+        "workspace."
     )
     mcp = get_mcp().tools_prompt()
     return base + "\n" + mcp if mcp else base
@@ -82,6 +98,14 @@ def run(name, args):
             skills.close_app(args.get("name", ""))
         elif name == "play_music":
             skills.play_music()
+        elif name == "write_file":
+            files.write_file(args.get("path", ""), args.get("content", ""))
+        elif name == "make_dir":
+            files.make_dir(args.get("path", ""))
+        elif name == "create_project":
+            files.create_project(args.get("name", ""), args.get("files"))
+        elif name == "relate":
+            graph.add(args.get("subject", ""), args.get("relation", ""), args.get("object", ""))
         return None
     # External MCP tool → return its result for the model to use.
     mcp = get_mcp()

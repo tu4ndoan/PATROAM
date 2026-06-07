@@ -82,7 +82,23 @@ class LocalVoice:
     def _rest(self):
         self._emit("state", "listening" if getattr(self.listener, "_active", False) else "sleeping")
 
+    def _stop_now(self):
+        """Halt everything: abort generation, stop speech, stay listening."""
+        if self.agent:
+            self.agent.cancel()
+        self.tts.interrupt()
+        self._pending = 0
+        self._speaking = False
+        self._buf = ""
+        self._set_busy(False)
+        self._rest()
+
     def _on_command(self, text):
+        # "Stop" works even mid-generation — handle it before anything else.
+        if skills.is_stop_speaking(text):
+            print("\n[patroam] stopped")
+            self._stop_now()
+            return
         # Barge-in: if PATROAM is talking and the user says something new, stop
         # talking and act on it (ignore it hearing its own voice).
         if self._speaking:
@@ -96,8 +112,11 @@ class LocalVoice:
         self._emit("status", text)
         reply = skills.try_handle(text)
         if reply is not None:
-            print(reply)
-            self._speak(reply)
+            if reply:
+                print(reply)
+                self._speak(reply)
+            else:
+                self._stop_now()
             return
         self._emit("state", "thinking")
         self._set_busy(True)            # hold the session through thinking + speaking

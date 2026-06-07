@@ -24,10 +24,12 @@ class Provider(ABC):
         on_token: Callable[[str], None],
         on_done: Callable[[str], None],
         on_error: Callable[[str], None],
+        cancel=None,
     ) -> None:
         """Stream a chat completion.
 
         Implementations should run in a background thread and invoke the
         callbacks as tokens arrive / the stream finishes / an error occurs.
-        `messages` is a list of {"role", "content"} dicts.
+        `messages` is a list of {"role", "content"} dicts. `cancel`, if given, is
+        a threading.Event — the loop should stop and close when it is set.
         """

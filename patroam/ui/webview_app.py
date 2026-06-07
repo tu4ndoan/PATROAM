@@ -143,10 +143,26 @@ class Controller:
         self._speaking_text = ""
         self._say_chunk(text)
 
+    def _stop_now(self):
+        """Halt everything: abort generation, stop speech, stay listening."""
+        self.agent.cancel()
+        self.tts.interrupt()
+        self._speaking = False
+        self._pending = 0
+        self._buf = ""
+        self.is_responding = False
+        self._set_busy(False)
+        self.set_status("stopped")
+        self.rest()
+
     # ── request handling ──────────────────────────────────────────────────────
     def handle(self, text):
         text = (text or "").strip()
         if not text:
+            return
+        # "Stop" works even mid-generation — handle it before any other gate.
+        if skills.is_stop_speaking(text):
+            self._stop_now()
             return
         # Barge-in: interrupt a reply in progress when the user speaks anew.
         if self._speaking:
@@ -162,9 +178,12 @@ class Controller:
         # Local commands first (e.g. "open Spotify").
         reply = skills.try_handle(text)
         if reply is not None:
-            self.set_status(reply)
-            self._chat_done(reply)
-            self.speak(reply)
+            if reply:
+                self.set_status(reply)
+                self._chat_done(reply)
+                self.speak(reply)
+            else:
+                self._stop_now()
             return
         if not self.agent.model:
             self.set_status("No model selected. Is Ollama running?")

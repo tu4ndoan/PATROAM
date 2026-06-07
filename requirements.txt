@@ -13,3 +13,10 @@ uvicorn[standard]
 anthropic
 # MCP connectors (optional — for external tools like the Meta Ads connector):
 mcp
+# PDF generation (optional — only needed to write .pdf files):
+reportlab
+# PDF reading for RAG (optional — only needed to index .pdf documents):
+pypdf
+# Vector database for RAG (optional — `pip install chromadb`; falls back to a JSON
+# index if absent). Use with an embedding model: `ollama pull nomic-embed-text`.
+chromadb

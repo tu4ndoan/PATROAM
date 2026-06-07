@@ -19,11 +19,13 @@ class OllamaProvider(Provider):
             req = urllib.request.Request(f"{self.url}/api/tags")
             with urllib.request.urlopen(req, timeout=3) as r:
                 data = json.loads(r.read())
-            return [m["name"] for m in data.get("models", [])]
+            # Exclude embedding-only models — they can't chat (used by RAG instead).
+            return [m["name"] for m in data.get("models", [])
+                    if "embed" not in m["name"].lower()]
         except Exception:
             return []
 
-    def stream_chat(self, model, messages, on_token, on_done, on_error):
+    def stream_chat(self, model, messages, on_token, on_done, on_error, cancel=None):
         def worker():
             payload = json.dumps({
                 "model": model,
@@ -40,6 +42,8 @@ class OllamaProvider(Provider):
                 with urllib.request.urlopen(req, timeout=120) as resp:
                     full = ""
                     for line in resp:
+                        if cancel is not None and cancel.is_set():
+                            return          # aborted: close the connection, no on_done
                         line = line.strip()
                         if not line:
                             continue

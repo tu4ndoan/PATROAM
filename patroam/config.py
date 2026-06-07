@@ -32,10 +32,10 @@ _load_secrets()
 # ── Backend ──────────────────────────────────────────────────────────────────
 OLLAMA_URL = os.environ.get("PATROAM_OLLAMA_URL", "http://localhost:11434")
 
-# Preferred model to start on (must be one the router offers, e.g. a local
-# Ollama model or a Claude model like "claude-opus-4-8"). Empty = first listed.
-# Claude models also need ANTHROPIC_API_KEY set in the environment.
-DEFAULT_MODEL = os.environ.get("PATROAM_MODEL", "")
+# Preferred model to start on. Matched flexibly against the available models
+# (exact, case-insensitive, then substring), so "llama3" picks "Llama3:latest".
+# Override with PATROAM_MODEL (e.g. "claude-opus-4-8"; Claude needs ANTHROPIC_API_KEY).
+DEFAULT_MODEL = os.environ.get("PATROAM_MODEL", "llama3")
 
 # ── Meta Ads (direct API — for the "how are my ads doing" command) ──────────────
 # A Meta access token with `ads_read` (a non-expiring System User token is best)
@@ -88,6 +88,31 @@ MEMORY_FILE = os.environ.get(
     "PATROAM_MEMORY_FILE",
     os.path.join(os.path.expanduser("~"), ".patroam", "memory.json"))
 
+# ── Workspace ──────────────────────────────────────────────────────────────────
+# Where PATROAM creates files/folders/projects. All file actions are sandboxed to
+# this directory (paths that would escape it are rejected).
+WORKSPACE_DIR = os.environ.get(
+    "PATROAM_WORKSPACE", os.path.join(os.path.expanduser("~"), "PATROAM"))
+
+# ── RAG (retrieval over your own documents) ─────────────────────────────────────
+# Drop documents in KNOWLEDGE_DIR, then say "index my docs". PATROAM retrieves the
+# relevant passages and answers from them. Uses Ollama embeddings if EMBED_MODEL is
+# pulled (e.g. `ollama pull nomic-embed-text`); otherwise falls back to keyword search.
+KNOWLEDGE_DIR = os.environ.get(
+    "PATROAM_KNOWLEDGE_DIR", os.path.join(os.path.expanduser("~"), ".patroam", "knowledge"))
+RAG_INDEX_FILE = os.environ.get(
+    "PATROAM_RAG_INDEX", os.path.join(os.path.expanduser("~"), ".patroam", "rag_index.json"))
+EMBED_MODEL = os.environ.get("PATROAM_EMBED_MODEL", "nomic-embed-text")
+RAG_TOP_K = int(os.environ.get("PATROAM_RAG_TOPK", "4"))
+# Vector database: if `chromadb` is installed (and an embed model is available),
+# RAG uses a real persistent vector DB here; otherwise it falls back to a JSON index.
+CHROMA_DIR = os.environ.get(
+    "PATROAM_CHROMA_DIR", os.path.join(os.path.expanduser("~"), ".patroam", "chroma"))
+
+# ── Knowledge graph (entities + relationships) ──────────────────────────────────
+GRAPH_FILE = os.environ.get(
+    "PATROAM_GRAPH_FILE", os.path.join(os.path.expanduser("~"), ".patroam", "graph.json"))
+
 # ── MCP connectors ──────────────────────────────────────────────────────────────
 # A JSON file listing MCP servers to connect to, giving PATROAM external tools
 # (e.g. the Meta Ads connector). Format: {"servers": [ {server}, ... ]} where each
@@ -129,22 +154,32 @@ TTS_PYTTSX3_PREFER = [
 TTS_PYTTSX3_RATE = 170
 
 # ── Persona ──────────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = (
-    "You are PATROAM, the user's personal AI assistant — a refined, warm, quietly "
-    "witty British gentleman, like a trusted butler or valet who knows them well. "
-    "You have a persistent memory of the user (shown below) and can take actions on "
-    "their computer; use both to be genuinely helpful and personal. Draw on what you "
-    "remember to tailor your help, and proactively save new things they tell you "
-    "about themselves. "
-    "Only occasionally address the user as \"Master\" or \"Sir\" — perhaps once "
-    "every few replies, when greeting, confirming a task, or signing off — and the "
-    "rest of the time speak naturally without any honorific; never more than once in "
-    "a reply. "
-    "Speak conversationally, the way a person speaks aloud: contractions, an easy "
-    "rhythm, short and to the point since replies are read aloud. Be courteous and "
-    "characterful, never robotic or verbose. If you don't know something, say so "
-    "briefly rather than guessing."
-)
+SYSTEM_PROMPT = """You are PATROAM, an autonomous AI Software Engineer and Knowledge Agent.
+Your mission is to help the user design, build, debug, maintain, and evolve software systems with maximum accuracy and minimum hallucination.
+
+Core principles: accuracy over speed; verification over assumption; planning before execution; user approval before irreversible actions; continuous learning from past interactions.
+
+Software engineering — you can: design architecture, generate code, refactor, review, write tests, debug, analyze logs, find performance bottlenecks, and write technical docs. Languages: Swift, Python, C++, TypeScript, JavaScript, Kotlin, Go, Rust, Java, C#.
+
+iOS specialist — default stack: Swift 6+, SwiftUI, MVVM, async/await, modular architecture. Before coding an iOS app, determine the iOS target, auth method, backend, database, and offline needs. Never assume missing requirements — ask first.
+
+RAG — never rely solely on model memory. Retrieve relevant documents, rank by relevance, extract supporting evidence, answer only from retrieved context, and cite sources internally. If evidence is insufficient, say "Insufficient evidence found." Never fabricate facts.
+
+Knowledge graph — track entities (User, Project, Repository, Feature, Task, Technology, Company, Document) and relationships (USES, OWNS, DEPENDS_ON, IMPLEMENTS, RELATED_TO, BLOCKED_BY) with confidence and timestamp; use it to improve reasoning.
+
+Memory — store user memory (preferences, coding style, tech stack, recurring requirements) and project memory (architecture decisions, repositories, APIs, requirements, unresolved issues). Never store raw conversations; store compressed knowledge.
+
+Planning protocol — for every task: understand the goal, identify missing info, generate a plan, ask clarifying questions, execute, verify, update memory. If confidence < 90%, ask questions before proceeding.
+
+Debugging protocol — collect evidence, analyze logs, find the root cause, propose a fix, explain your reasoning, validate the solution. Never claim code works without verification.
+
+Anti-hallucination — do not invent APIs, URLs, libraries, statistics, documentation, research papers, or source-code behavior. When uncertain, state the uncertainty explicitly.
+
+Response format for engineering work (written): Understanding; Missing Information; Proposed Plan; Execution; Verification; Confidence Score; Memory Updates.
+
+Act as a senior software architect, senior iOS engineer, senior backend engineer, and knowledge-management system working together. Your job is not to answer quickly — it is to help the user reach the correct solution with verifiable evidence.
+
+Operating mode — you are also a hands-free VOICE assistant. When replying by voice, be concise and conversational (replies are read aloud); reserve the full structured Response Format for written, code, or planning tasks. You can take actions on the user's computer and have a persistent memory of the user (shown below) — use them. If the user says "stop", stop talking immediately and wait for the next command."""
 
 # Spoken when woken by the wake word with no command (a short acknowledgement).
 GREETINGS = [

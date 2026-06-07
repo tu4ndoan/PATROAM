@@ -168,19 +168,35 @@ class PatroamChat(tk.Tk):
     # ── Sending ───────────────────────────────────────────────────────────────
     def _send_text(self):
         text = self.input_box.get().strip()
-        if not text or self.is_responding:
+        if not text or (self.is_responding and not skills.is_stop_speaking(text)):
             return
         self.input_box.delete(0, "end")
         self._send(text)
 
+    def _stop_now(self):
+        """Halt everything: abort generation, stop speech, stay listening."""
+        self.agent.cancel()
+        self.tts.interrupt()
+        self.is_responding = False
+        self.send_btn.configure(state="normal", bg=self.ACCENT)
+        self._set_status("stopped")
+        self._rest()
+
     def _send(self, text):
         if not text.strip():
+            return
+        # "Stop" works even mid-generation — handle it first.
+        if skills.is_stop_speaking(text):
+            self._stop_now()
             return
         # Try to act on it locally first (e.g. "open Spotify").
         handled = skills.try_handle(text)
         if handled is not None:
-            self._set_status(handled)
-            self._speak(handled)
+            if handled:
+                self._set_status(handled)
+                self._speak(handled)
+            else:
+                self._stop_now()
             return
 
         model = self.model_var.get()
@@ -274,7 +290,7 @@ class PatroamChat(tk.Tk):
         self._set_visual_state("sleeping")
 
     def _on_wake_command(self, text):
-        if self.is_responding:
+        if self.is_responding and not skills.is_stop_speaking(text):
             return
         self._send(text)
 

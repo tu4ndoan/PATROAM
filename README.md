@@ -42,10 +42,23 @@ Early. The package today provides:
   app (resolved via Start Menu, registered URI schemes, App Paths, or PATH;
   unknown names like "open YouTube" fall back to the website). "Play some music"
   opens Spotify on your Liked Songs and starts playback. See `skills.py`.
+- **Creates real files & projects** — "build me a todo app", "write a README",
+  "make a Python script" → PATROAM actually writes the files/folders to your
+  `~/PATROAM` workspace (.py, .md, .txt, .json, .html, .pdf, …) and just speaks a
+  short summary of what it made. Sandboxed to the workspace. See `files.py`.
 - **Memory (learns you over time)** — remembers facts about you across sessions
   and feeds them into every reply. Say "remember that I…", "forget…", or "what
   do you remember about me", and the model can also save things on its own.
   Stored in `~/.patroam/memory.json`. See `memory.py`.
+- **RAG + vector database** — drop files in `~/.patroam/knowledge` (.txt .md .py
+  .json .csv .html .pdf …), say "index my docs", and PATROAM retrieves relevant
+  passages to answer — citing the source, and saying "Insufficient evidence found"
+  when they don't cover it. Uses a real vector DB (**ChromaDB**, `pip install
+  chromadb`) with Ollama embeddings (`ollama pull nomic-embed-text`); falls back to
+  a JSON index + keyword search if either is absent. See `rag.py`.
+- **Knowledge graph** — records how things connect (project USES technology, person
+  OWNS project, X DEPENDS_ON Y…) as it learns them, and feeds the relevant
+  relationships back into context. Ask "show the knowledge graph". See `graph.py`.
 - **Model-driven actions (tool-calling)** — the model can decide to remember,
   open/close an app, or play music mid-conversation via a portable `ACTION:`
   protocol that works on any model. See `actions.py`.

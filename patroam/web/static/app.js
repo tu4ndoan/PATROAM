@@ -52,6 +52,7 @@
       streamed=false; curBot=null; }
     else if(m.type==='error'){ responding=false; status(m.text); rest(); }
     else if(m.type==='status'){ status(m.text); }
+    else if(m.type==='stop'){ responding=false; stopSpeaking(); status('stopped'); rest(); }
     else if(m.type==='state'){ orb.setState(m.state); }   // mirror local-machine voice
   }
 

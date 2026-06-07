@@ -9,7 +9,9 @@ centrally handles two things so every frontend benefits for free:
     output and executed (open apps, remember facts, …).
 """
 
-from .. import actions, config
+import threading
+
+from .. import actions, config, graph, rag
 from ..memory import get_memory
 
 # Hold back this many trailing chars while streaming so a partial "ACTION:"
@@ -26,16 +28,29 @@ class Agent:
         self.base_system = system_prompt or config.SYSTEM_PROMPT
         self.memory = memory if memory is not None else get_memory()
         self.history = []  # [{"role", "content"}]
+        self._cancel = None      # threading.Event for the in-flight request
+        self._rag = ""           # retrieved document context for the current query
+        self._graph = ""         # relevant knowledge-graph facts for the query
 
     def set_model(self, model):
         self.model = model
+
+    def cancel(self):
+        """Abort the current in-flight generation (e.g. the user said 'stop')."""
+        if self._cancel is not None:
+            self._cancel.set()
 
     def reset(self):
         self.history.clear()
 
     def _system(self):
-        # Persona + how to use tools + what we remember about the user.
-        return f"{self.base_system}\n\n{actions.tools_prompt()}\n\n{self.memory.render()}"
+        # Persona + how to use tools + what we remember + retrieved documents.
+        parts = [self.base_system, actions.tools_prompt(), self.memory.render()]
+        if self._graph:
+            parts.append(self._graph)
+        if self._rag:
+            parts.append(self._rag)
+        return "\n\n".join(parts)
 
     def _messages(self):
         return [{"role": "system", "content": self._system()}] + self.history
@@ -45,10 +60,15 @@ class Agent:
         if a tool returned data — feed it back and continue until the model has a
         final spoken answer."""
         self.history.append({"role": "user", "content": text})
+        self._cancel = threading.Event()
+        # Retrieve relevant passages from the user's documents + graph facts.
+        self._rag = rag.context_for(text) if rag.available() else ""
+        self._graph = graph.render_for(text)
         self._turn(on_token, on_done, on_error, 0)
 
     def _turn(self, on_token, on_done, on_error, rnd):
         state = {"raw": [], "sent": 0}
+        cancel = self._cancel
 
         def forward(s, final=False):
             idx = s.find("ACTION:")
@@ -63,10 +83,14 @@ class Agent:
                 state["sent"] = target
 
         def tok(t):
+            if cancel.is_set():                    # aborted — drop tokens
+                return
             state["raw"].append(t)
             forward("".join(state["raw"]))
 
         def done(full):
+            if cancel.is_set():                    # aborted — no reply, no tool loop
+                return
             forward(full, final=True)              # flush the held tail
             spoken, acts = actions.split(full)
             self.history.append({"role": "assistant", "content": spoken})
@@ -90,4 +114,4 @@ class Agent:
             else:
                 on_done(spoken)
 
-        self.provider.stream_chat(self.model, self._messages(), tok, done, on_error)
+        self.provider.stream_chat(self.model, self._messages(), tok, done, on_error, cancel=cancel)

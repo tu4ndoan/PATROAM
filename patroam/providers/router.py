@@ -25,8 +25,8 @@ class RouterProvider(Provider):
     def _route(self, model):
         return self.anthropic if (model or "").lower().startswith("claude") else self.ollama
 
-    def stream_chat(self, model, messages, on_token, on_done, on_error):
-        self._route(model).stream_chat(model, messages, on_token, on_done, on_error)
+    def stream_chat(self, model, messages, on_token, on_done, on_error, cancel=None):
+        self._route(model).stream_chat(model, messages, on_token, on_done, on_error, cancel=cancel)
 
 
 def make_provider():
@@ -35,10 +35,20 @@ def make_provider():
 
 
 def pick_default(models):
-    """Choose the model to start on: PATROAM_MODEL if set and available, else
-    the first model offered."""
+    """Choose the model to start on: config.DEFAULT_MODEL matched flexibly against
+    the available models (exact → case-insensitive → substring), else the first."""
     if not models:
         return None
-    if config.DEFAULT_MODEL and config.DEFAULT_MODEL in models:
-        return config.DEFAULT_MODEL
+    want = (config.DEFAULT_MODEL or "").strip()
+    if want:
+        for m in models:                       # exact
+            if m == want:
+                return m
+        wl = want.lower()
+        for m in models:                       # case-insensitive
+            if m.lower() == wl:
+                return m
+        for m in models:                       # substring / prefix (e.g. "llama3")
+            if wl in m.lower():
+                return m
     return models[0]
