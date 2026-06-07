@@ -18,8 +18,6 @@ import threading
 import time
 import webbrowser
 
-from .memory import get_memory
-
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 
@@ -60,7 +58,8 @@ GRAPH_RE = re.compile(r"\b(knowledge graph|what'?s connected|show.{0,15}(connect
 # Explicit "connect/link A to B" → a RELATED_TO edge.
 CONNECT_RE = re.compile(r"^\s*(?:connect|link)\s+(.+?)\s+(?:to|with|and)\s+(.+)$", re.I)
 
-# Relationship verbs → canonical relation. Order matters (most specific first).
+# Relationship verbs → canonical relation. Order matters (most specific first);
+# the generic "is/are" attribute pattern is LAST so it never shadows the others.
 _REL_PATTERNS = [
     (r"depends? on|relies on|requires|needs", "DEPENDS_ON"),
     (r"is part of|are part of|belongs? to|is in|lives in", "PART_OF"),
@@ -69,22 +68,58 @@ _REL_PATTERNS = [
     (r"implements|provides|exposes", "IMPLEMENTS"),
     (r"is blocked by|blocked by|waiting on", "BLOCKED_BY"),
     (r"uses|use|is built (?:on|with)|built (?:on|with)|runs on|written in|powered by", "USES"),
-    (r"works? on|works? for|created|made|built|leads|manages|maintains", "RELATED_TO"),
+    (r"works? on|works? for|created|made|built|leads|manages|maintains", "WORKS_ON"),
     (r"is related to|relates? to|connected to|links? to", "RELATED_TO"),
+    (r"likes?|loves?|enjoys?|prefers?", "LIKES"),
+    (r"hates?|dislikes?", "DISLIKES"),
+    (r"knows?", "KNOWS"),
+    (r"is|are|am|was|were|seems?|looks?", "IS"),
 ]
 _REL_RE = [(re.compile(rf"^(.+?)\s+(?:{p})\s+(.+)$", re.I), rel) for p, rel in _REL_PATTERNS]
+
+# Filler words trimmed from an extracted object so "very handsome" → "handsome".
+_OBJ_FILLER = re.compile(
+    r"^(?:a|an|the|very|really|so|quite|just|also|pretty|kind of|sort of|"
+    r"my|our|your|his|her|their|its)\s+", re.I)
+
+# Questions / non-statements we should NOT silently learn from.
+_NOT_STATEMENT = re.compile(
+    r"^\s*(who|what|when|where|why|how|which|is|are|was|were|do|does|did|can|"
+    r"could|would|will|should|tell me|show|find|open|close|play|search)\b", re.I)
+
+
+def _clean_obj(o):
+    o = o.strip().rstrip(".!?")
+    while True:
+        n = _OBJ_FILLER.sub("", o)
+        if n == o:
+            break
+        o = n
+    return o.strip()
 
 
 def extract_triple(text):
     """Parse 'A <verb> B' into (subject, RELATION, object), or None."""
     t = (text or "").strip().rstrip(".!?")
+    # Expand a few contractions so "I'm a doctor" / "they're cool" parse.
+    t = re.sub(r"\bi'm\b", "i am", t, flags=re.I)
+    t = re.sub(r"(\w)'re\b", r"\1 are", t, flags=re.I)
     for rx, rel in _REL_RE:
         m = rx.match(t)
         if m:
-            s, o = m.group(1).strip(), m.group(2).strip()
+            s, o = m.group(1).strip(), _clean_obj(m.group(2))
             if s and o and len(s) < 80 and len(o) < 80:
                 return s, rel, o
     return None
+
+
+def learn_triple(text):
+    """Like extract_triple, but only for declarative statements (not questions /
+    commands) — used to passively learn graph facts from normal conversation."""
+    t = (text or "").strip()
+    if not t or t.endswith("?") or _NOT_STATEMENT.match(t):
+        return None
+    return extract_triple(t)
 
 # Words to strip from a spoken app name ("open the spotify app please" -> spotify)
 _FILLER = {
@@ -326,25 +361,40 @@ def try_handle(text):
         graph.add(s, "RELATED_TO", o)
         return f"Connected {s} and {o} in your knowledge graph{_addr()}."
 
-    # Memory commands first.
+    # Memory commands — everything is remembered in the knowledge graph.
     m = REMEMBER_RE.match(text)
     if m:
+        from . import graph
         body = m.group(1).strip().rstrip(".!?")
-        # If it states a relationship, record it as a graph triple (not just a flat fact).
+        # A relationship/attribute becomes a triple; anything else, a free-text note.
         tr = extract_triple(body)
         if tr:
-            from . import graph
             graph.add(*tr)
-            rel = tr[1].replace("_", " ").lower()
-            return f"Noted{_addr()} — added to your knowledge graph: {tr[0]} {rel} {tr[2]}."
-        get_memory().add_fact(body)
+            s, rel, o = graph._norm(tr[0]), tr[1].replace("_", " ").lower(), graph._norm(tr[2])
+            return f"Noted{_addr()} — added to your knowledge graph: {s} {rel} {o}."
+        graph.add_note(body)
         return f"Noted{_addr()}. I'll remember that."
     m = FORGET_RE.match(text)
     if m:
-        n = get_memory().forget(m.group(1).strip())
-        return f"Done{_addr()}." if n else "I didn't have anything matching that."
+        from . import graph
+        body = m.group(1).strip().rstrip(".!?")
+        # "forget that Trump is handsome" → drop that specific graph connection.
+        tr = extract_triple(body)
+        if tr and graph.remove_triple(tr[0], tr[2], tr[1]):
+            s, rel, o = graph._norm(tr[0]), tr[1].replace("_", " ").lower(), graph._norm(tr[2])
+            return f"Forgotten{_addr()} — removed from your knowledge graph: {s} {rel} {o}."
+        # Otherwise remove matching facts/notes/entities from the graph. Try the
+        # whole phrase first, then fall back to its most significant word.
+        removed = graph.forget(body)
+        if not removed:
+            for w in sorted(re.findall(r"[a-z0-9]{4,}", body.lower()), key=len, reverse=True):
+                removed = graph.forget(w)
+                if removed:
+                    break
+        return f"Done{_addr()}." if removed else "I didn't have anything matching that."
     if RECALL_RE.search(text):
-        return get_memory().summary()
+        from . import graph
+        return graph.user_summary()
 
     # Knowledge-graph overview.
     if GRAPH_RE.search(text):

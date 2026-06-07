@@ -82,11 +82,8 @@ VOICE_TMP_WAV = os.path.join(tempfile.gettempdir(), "patroam_voice_input.wav")
 TTS_TMP_MP3 = os.path.join(tempfile.gettempdir(), "patroam_tts.mp3")
 
 # ── Memory ─────────────────────────────────────────────────────────────────────
-# Persistent across restarts (the practical form of "learning"). Override with
-# PATROAM_MEMORY_FILE.
-MEMORY_FILE = os.environ.get(
-    "PATROAM_MEMORY_FILE",
-    os.path.join(os.path.expanduser("~"), ".patroam", "memory.json"))
+# PATROAM's memory about the user now lives in the knowledge graph (graph.py,
+# under the "You" entity) — there is no separate memory.json store.
 
 # ── Workspace ──────────────────────────────────────────────────────────────────
 # Where PATROAM creates files/folders/projects. All file actions are sandboxed to

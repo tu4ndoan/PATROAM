@@ -16,7 +16,6 @@ _tmp = tempfile.mkdtemp(prefix="patroam_verify_")
 os.environ["PATROAM_KNOWLEDGE_DIR"] = os.path.join(_tmp, "knowledge")
 os.environ["PATROAM_RAG_INDEX"] = os.path.join(_tmp, "rag_index.json")
 os.environ["PATROAM_GRAPH_FILE"] = os.path.join(_tmp, "graph.json")
-os.environ["PATROAM_MEMORY_FILE"] = os.path.join(_tmp, "memory.json")
 os.environ["PATROAM_CHROMA_DIR"] = os.path.join(_tmp, "chroma")
 os.makedirs(os.environ["PATROAM_KNOWLEDGE_DIR"], exist_ok=True)
 

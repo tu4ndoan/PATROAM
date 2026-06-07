@@ -15,10 +15,8 @@ import re
 
 from . import files, graph, skills
 from .mcp_client import get_mcp
-from .memory import get_memory
-
 _LOCAL = {"remember", "forget", "open_app", "close_app", "play_music",
-          "write_file", "make_dir", "create_project", "relate"}
+          "write_file", "make_dir", "create_project", "relate", "unrelate"}
 
 _ACTION_RE = re.compile(r"^ACTION:\s*([a-zA-Z_]\w*)\s*(\{.*\})?\s*$", re.M)
 
@@ -46,9 +44,15 @@ def tools_prompt():
         '- create_project {"name": "...", "files": {"relative/path": "content", …}} '
         "— scaffold a whole project (a folder with many files) in one action.\n"
         '- relate {"subject": "...", "relation": "USES|OWNS|DEPENDS_ON|IMPLEMENTS|'
-        'RELATED_TO|BLOCKED_BY", "object": "..."} — record a relationship in the '
-        "knowledge graph (e.g. project X USES technology Y). Use it whenever the user "
-        "reveals how things connect, so you can reason over it later.\n"
+        'IS|LIKES|WORKS_ON|RELATED_TO|BLOCKED_BY", "object": "..."} — add/update a '
+        "relationship in the knowledge graph (e.g. \"Trump IS handsome\", \"Orion USES "
+        "Postgres\"). Use it WHENEVER the user states a fact, attribute, opinion or "
+        "connection about an entity, so the graph stays current.\n"
+        '- unrelate {"subject": "...", "object": "...", "relation": "..."} — remove a '
+        "connection when the user retracts or corrects something (e.g. they say "
+        "\"forget that Trump is handsome\"). Omit relation to remove any link between them.\n"
+        "Maintain the knowledge graph as you chat: create nodes/links for new facts, "
+        "and remove links the user takes back.\n"
         "Rules: keep your spoken reply natural, warm and brief. NEVER read the "
         "ACTION lines aloud or mention them. Only include ACTION lines when needed.\n"
         "IMPORTANT — when asked to create code, files, an app, or any lengthy output, "
@@ -87,11 +91,13 @@ def run(name, args):
     """
     args = args or {}
     if name in _LOCAL:
-        mem = get_memory()
         if name == "remember":
-            mem.add_fact(args.get("text", ""))
+            # Remember a fact about the user, in the knowledge graph.
+            text = args.get("text", "")
+            tr = skills.extract_triple(text)
+            graph.add(*tr) if tr else graph.add_note(text)
         elif name == "forget":
-            mem.forget(args.get("text", ""))
+            graph.forget(args.get("text", ""))
         elif name == "open_app":
             skills.open_app(args.get("name", ""))
         elif name == "close_app":
@@ -106,6 +112,9 @@ def run(name, args):
             files.create_project(args.get("name", ""), args.get("files"))
         elif name == "relate":
             graph.add(args.get("subject", ""), args.get("relation", ""), args.get("object", ""))
+        elif name == "unrelate":
+            graph.remove_triple(args.get("subject", ""), args.get("object", ""),
+                                args.get("relation"))
         return None
     # External MCP tool → return its result for the model to use.
     mcp = get_mcp()

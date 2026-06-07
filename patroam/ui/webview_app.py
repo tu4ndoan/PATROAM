@@ -76,6 +76,11 @@ class Controller:
         """Tell the open inspector to reload (graph/RAG may have changed)."""
         self._eval("window.patroam.inspectorChanged && window.patroam.inspectorChanged()")
 
+    def _focus_graph(self, text):
+        """Ask the inspector to focus the graph node mentioned in `text` (if any)."""
+        self._eval("window.patroam.focusFromText && window.patroam.focusFromText("
+                   + json.dumps(text or "") + ")")
+
     # ── chat panel push ─────────────────────────────────────────────────────────
     def _chat_user(self, text):
         self._eval(f"window.patroam.chatUser({json.dumps(text)})")
@@ -187,6 +192,7 @@ class Controller:
                 self._chat_done(reply)
                 self.speak(reply)
                 self._inspector_dirty()   # a skill may have changed graph/RAG
+                self._focus_graph(text)
             else:
                 self._stop_now()
             return
@@ -214,6 +220,7 @@ class Controller:
             self._chat_done(full)
             self._flush_rest()
             self._inspector_dirty()     # the model may have recorded a relation
+            self._focus_graph(text)     # focus a node the user asked about
             if self._pending == 0:      # nothing was spoken (e.g. empty/tts off)
                 self._set_busy(False)
                 self.rest()

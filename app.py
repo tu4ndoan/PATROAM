@@ -46,6 +46,27 @@ def _bootstrap():
                 print(f"  Skipped {pkg}: {e}")
 
 
+_LOCK_SOCK = None
+
+
+def _acquire_single_instance():
+    """Guarantee only ONE PATROAM runs at a time, so instances never talk over
+    each other (the cause of hearing 2–3 voices at once). We grab an OS-level
+    lock by binding a fixed loopback port; if it's taken, another PATROAM is
+    already running and this one should bow out. Returns True if we hold it."""
+    global _LOCK_SOCK
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", 49517))
+        s.listen(1)
+        _LOCK_SOCK = s          # keep the socket open for the whole process life
+        return True
+    except OSError:
+        s.close()
+        return False
+
+
 def _run_tk():
     from patroam.ui import PatroamChat
     PatroamChat().mainloop()
@@ -82,8 +103,14 @@ def _start_rag():
 
 
 def main():
+    if not _acquire_single_instance():
+        print("PATROAM is already running — not starting a second instance "
+              "(this prevents two voices speaking at once).")
+        return
     _bootstrap()
     #_start_mcp()
+    #_start_daemon()  # never auto-start the headless daemon; the desktop orb
+    #                   already listens. Running both = overlapping voices.
     _start_rag()
     args = sys.argv[1:]
     if "--web" in args:

@@ -90,8 +90,12 @@
   .gexpand:hover { border-color:var(--accent); box-shadow:0 0 12px rgba(123,92,255,.4); }
   #graphCv { cursor:grab; touch-action:none; }
   #graphCv:active { cursor:grabbing; }
-  .ghint { display:none; position:absolute; top:10px; left:14px; z-index:31; pointer-events:none;
-    font-size:11px; color:rgba(180,190,230,.7); text-shadow:0 0 8px rgba(0,0,0,.8); }
+  .kg-search { position:absolute; top:8px; left:8px; z-index:31; width:150px; font-size:12px;
+    padding:6px 9px; }
+  .graphwrap.full .kg-search { width:280px; top:14px; left:14px; }
+  .ghint { display:none; position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+    z-index:31; pointer-events:none; font-size:11px; color:rgba(180,190,230,.7);
+    text-shadow:0 0 8px rgba(0,0,0,.8); }
   .graphwrap.full .ghint { display:block; }
   .kg-overlay { display:none; position:absolute; left:14px; bottom:14px; z-index:31;
     width:300px; max-height:62%; overflow:auto; padding:12px 14px; border-radius:12px;
@@ -146,6 +150,7 @@
       </div>
       <div id="pane-kg" class="pane sel">
         <div id="graphWrap" class="graphwrap">
+          <input id="kgSearch" class="kg-search glass" placeholder="🔍 Search node…" />
           <canvas id="graphCv"></canvas>
           <span class="gexpand" id="gExpand" title="Expand / collapse">⤢</span>
           <div class="ghint">drag to rotate · scroll to zoom · click a node to focus · Esc to exit</div>
@@ -542,6 +547,27 @@ function pickAt(clientX, clientY){
 }
 function selectNode(id){ G.sel=id; G.focus=true; renderDetail(); }
 function clearSel(){ G.sel=null; renderDetail(); }
+
+// Find a node by name: exact → substring → name contained in a phrase.
+function findNode(q){ q=(q||'').toLowerCase().trim(); if(!q||!G.nodes.length) return null;
+  let m=G.nodes.find(n=>n.id.toLowerCase()===q); if(m) return m;
+  m=G.nodes.find(n=>n.id.toLowerCase().includes(q)); if(m) return m;
+  let best=null; for(const n of G.nodes){ const id=n.id.toLowerCase();
+    if(q.includes(id) && (!best||id.length>best.id.length)) best=n; }
+  return best;
+}
+// Called by Python when you ask PATROAM about something — focus the node if any.
+window.patroam.focusFromText=function(text){
+  if(!text || !insp.classList.contains('open') || !G.nodes.length) return;
+  const n=findNode(text); if(!n) return;
+  if(!$('pane-kg').classList.contains('sel')){ const tb=document.querySelector('.tab[data-tab="kg"]'); if(tb) tb.click(); }
+  selectNode(n.id);
+};
+// Search bar: focus a node as you type / on Enter.
+$('kgSearch').addEventListener('input', e=>{ const v=e.target.value.trim();
+  if(!v){ clearSel(); return; } const n=findNode(v); if(n) selectNode(n.id); });
+$('kgSearch').addEventListener('keydown', e=>{ if(e.key==='Enter'){ const n=findNode(e.target.value);
+  if(n){ selectNode(n.id); } } e.stopPropagation(); });
 
 function renderDetail(){
   const dEl=$('kgDetail'), oEl=$('kgOverlay');

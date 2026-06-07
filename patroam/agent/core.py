@@ -12,7 +12,6 @@ centrally handles two things so every frontend benefits for free:
 import threading
 
 from .. import actions, config, graph, llm, rag
-from ..memory import get_memory
 
 # Hold back this many trailing chars while streaming so a partial "ACTION:"
 # marker can't leak into the spoken text before we recognise it.
@@ -22,11 +21,10 @@ _MAX_TOOL_ROUNDS = 4
 
 
 class Agent:
-    def __init__(self, provider, model=None, system_prompt=None, memory=None):
+    def __init__(self, provider, model=None, system_prompt=None):
         self.provider = provider
         self.model = model
         self.base_system = system_prompt or config.SYSTEM_PROMPT
-        self.memory = memory if memory is not None else get_memory()
         self.history = []  # [{"role", "content"}]
         self._cancel = None      # threading.Event for the in-flight request
         self._rag = ""           # retrieved document context for the current query
@@ -74,7 +72,7 @@ class Agent:
 
     def _system(self):
         # Persona + how to use tools + what we remember + retrieved documents.
-        parts = [self.base_system, actions.tools_prompt(), self.memory.render()]
+        parts = [self.base_system, actions.tools_prompt(), graph.render_profile()]
         if self._graph:
             parts.append(self._graph)
         if self._rag:
@@ -90,10 +88,22 @@ class Agent:
         final spoken answer."""
         self.history.append({"role": "user", "content": text})
         self._cancel = threading.Event()
+        # Passively learn relationships the user states ("Trump is handsome").
+        self._learn(text)
         # Retrieve relevant passages from the user's documents + graph facts.
         self._rag = rag.context_for(text) if rag.available() else ""
         self._graph = graph.render_for(text)
         self._turn(on_token, on_done, on_error, 0)
+
+    def _learn(self, text):
+        """Capture a relationship from a declarative user message into the graph."""
+        try:
+            from .. import skills
+            tr = skills.learn_triple(text)
+            if tr:
+                graph.add(tr[0], tr[1], tr[2], confidence=0.7)
+        except Exception:
+            pass
 
     def _turn(self, on_token, on_done, on_error, rnd):
         state = {"raw": [], "sent": 0}

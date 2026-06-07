@@ -49,7 +49,9 @@ Early. The package today provides:
 - **Memory (learns you over time)** — remembers facts about you across sessions
   and feeds them into every reply. Say "remember that I…", "forget…", or "what
   do you remember about me", and the model can also save things on its own.
-  Stored in `~/.patroam/memory.json`. See `memory.py`.
+  Memory lives **in the knowledge graph** under a `You` entity (no separate store)
+  — so what PATROAM knows about you is part of the same graph you can browse and
+  visualise. See `graph.py`.
 - **RAG + vector database** — drop files in `~/.patroam/knowledge` (.txt .md .py
   .json .csv .html .pdf …), say "index my docs", and PATROAM retrieves relevant
   passages to answer — citing the source, and saying "Insufficient evidence found"

@@ -21,6 +21,17 @@ _WORD = re.compile(r"[a-z0-9]+")
 _CACHE = None
 MAX_TRIPLES = 1000
 
+# The user is a first-class entity in the graph — this is where "memory about
+# you" lives now (no separate memory.json). First-person words map onto it so
+# "I like pizza" becomes (You)-[LIKES]->(pizza).
+USER = "You"
+_FIRST_PERSON = {"i", "me", "my", "myself", "mine"}
+
+
+def _norm(entity):
+    e = (entity or "").strip()
+    return USER if e.lower() in _FIRST_PERSON else e
+
 
 def _load():
     global _CACHE
@@ -44,9 +55,9 @@ def _save():
 
 
 def add(subject, relation, obj, confidence=1.0):
-    s = (subject or "").strip()
+    s = _norm(subject)
     r = (relation or "").strip().upper().replace(" ", "_")
-    o = (obj or "").strip()
+    o = _norm(obj)
     if not s or not r or not o:
         return False
     triples = _load()["triples"]
@@ -60,6 +71,25 @@ def add(subject, relation, obj, confidence=1.0):
     _load()["triples"] = triples[-MAX_TRIPLES:]
     _save()
     return True
+
+
+def remove_triple(subject, obj, relation=None):
+    """Remove a specific connection (e.g. 'forget that Trump is handsome').
+    If `relation` is None, removes any link between subject and object.
+    Matching is case-insensitive. Returns the number of triples removed."""
+    s = _norm(subject).lower()
+    o = _norm(obj).lower()
+    r = (relation or "").strip().upper().replace(" ", "_")
+    if not s or not o:
+        return 0
+    g = _load()
+    before = len(g["triples"])
+    g["triples"] = [t for t in g["triples"] if not (
+        t["s"].lower() == s and t["o"].lower() == o and (not r or t["r"] == r))]
+    removed = before - len(g["triples"])
+    if removed:
+        _save()
+    return removed
 
 
 def forget(entity):
@@ -100,6 +130,41 @@ def summary(limit=15):
     if not triples:
         return "My knowledge graph is empty so far."
     return "Here's what I know is connected: " + "; ".join(_phrase(t) for t in triples[-limit:]) + "."
+
+
+# ── memory about the user (lives in the graph, not a separate store) ───────────────
+def add_note(text):
+    """Remember a free-text fact about the user (one that isn't a clean triple)."""
+    text = (text or "").strip()
+    return add(USER, "NOTE", text) if text else False
+
+
+def _user_facts():
+    u = USER.lower()
+    return [t for t in _load()["triples"] if t["s"].lower() == u or t["o"].lower() == u]
+
+
+def _fact_phrase(t):
+    return t["o"] if t["r"] == "NOTE" else _phrase(t)
+
+
+def render_profile(limit=60):
+    """Always-on block for the system prompt: what PATROAM knows about the user."""
+    facts = _user_facts()
+    if not facts:
+        return "You have no saved facts about the user yet. Learn about them as you chat."
+    lines = ["What you remember about the user (use it to personalise your help):"]
+    lines += [f"- {_fact_phrase(t)}" for t in facts[-limit:]]
+    return "\n".join(lines)
+
+
+def user_summary(limit=12):
+    """Spoken read-back for 'what do you know about me'."""
+    facts = _user_facts()
+    if not facts:
+        return "I don't have anything saved about you yet, Sir."
+    return "Here's what I remember about you: " + "; ".join(
+        _fact_phrase(t) for t in facts[-limit:]) + "."
 
 
 def all_triples():
