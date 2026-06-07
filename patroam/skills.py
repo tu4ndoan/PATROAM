@@ -57,6 +57,35 @@ INGEST_RE = re.compile(r"\b(index|re-?index|ingest|reload|refresh|rebuild|update
 # Knowledge-graph overview ("knowledge graph", "what's connected", …).
 GRAPH_RE = re.compile(r"\b(knowledge graph|what'?s connected|show.{0,15}(connections|graph))\b", re.I)
 
+# Explicit "connect/link A to B" → a RELATED_TO edge.
+CONNECT_RE = re.compile(r"^\s*(?:connect|link)\s+(.+?)\s+(?:to|with|and)\s+(.+)$", re.I)
+
+# Relationship verbs → canonical relation. Order matters (most specific first).
+_REL_PATTERNS = [
+    (r"depends? on|relies on|requires|needs", "DEPENDS_ON"),
+    (r"is part of|are part of|belongs? to|is in|lives in", "PART_OF"),
+    (r"is owned by|owned by", "OWNED_BY"),
+    (r"owns|has", "OWNS"),
+    (r"implements|provides|exposes", "IMPLEMENTS"),
+    (r"is blocked by|blocked by|waiting on", "BLOCKED_BY"),
+    (r"uses|use|is built (?:on|with)|built (?:on|with)|runs on|written in|powered by", "USES"),
+    (r"works? on|works? for|created|made|built|leads|manages|maintains", "RELATED_TO"),
+    (r"is related to|relates? to|connected to|links? to", "RELATED_TO"),
+]
+_REL_RE = [(re.compile(rf"^(.+?)\s+(?:{p})\s+(.+)$", re.I), rel) for p, rel in _REL_PATTERNS]
+
+
+def extract_triple(text):
+    """Parse 'A <verb> B' into (subject, RELATION, object), or None."""
+    t = (text or "").strip().rstrip(".!?")
+    for rx, rel in _REL_RE:
+        m = rx.match(t)
+        if m:
+            s, o = m.group(1).strip(), m.group(2).strip()
+            if s and o and len(s) < 80 and len(o) < 80:
+                return s, rel, o
+    return None
+
 # Words to strip from a spoken app name ("open the spotify app please" -> spotify)
 _FILLER = {
     "the", "a", "my", "app", "apps", "application", "please", "for", "me",
@@ -289,10 +318,26 @@ def try_handle(text):
     if STOP_SPEAKING_RE.match(text):
         return ""
 
+    # "connect A to B" → a knowledge-graph edge.
+    m = CONNECT_RE.match(text)
+    if m:
+        from . import graph
+        s, o = m.group(1).strip().rstrip(".!?"), m.group(2).strip().rstrip(".!?")
+        graph.add(s, "RELATED_TO", o)
+        return f"Connected {s} and {o} in your knowledge graph{_addr()}."
+
     # Memory commands first.
     m = REMEMBER_RE.match(text)
     if m:
-        get_memory().add_fact(m.group(1).strip().rstrip(".!?"))
+        body = m.group(1).strip().rstrip(".!?")
+        # If it states a relationship, record it as a graph triple (not just a flat fact).
+        tr = extract_triple(body)
+        if tr:
+            from . import graph
+            graph.add(*tr)
+            rel = tr[1].replace("_", " ").lower()
+            return f"Noted{_addr()} — added to your knowledge graph: {tr[0]} {rel} {tr[2]}."
+        get_memory().add_fact(body)
         return f"Noted{_addr()}. I'll remember that."
     m = FORGET_RE.match(text)
     if m:
@@ -309,12 +354,13 @@ def try_handle(text):
     # Re-index the user's documents for RAG.
     if INGEST_RE.search(text):
         from . import rag
-        n, m = rag.ingest()
+        n, m, tr = rag.ingest()
         if not n:
             return ("I didn't find any documents in your knowledge folder "
                     "(~/.patroam/knowledge). Drop some in and ask again.")
+        facts = f", and built {tr} fact{'s' if tr != 1 else ''} into your knowledge graph" if tr else ""
         return (f"Indexed {n} passage{'s' if n != 1 else ''} from "
-                f"{m} document{'s' if m != 1 else ''}{_addr()}.")
+                f"{m} document{'s' if m != 1 else ''}{facts}{_addr()}.")
 
     # Ad stats (direct Meta API — reliable on any model).
     if ADS_RE.search(text) and ADS_CTX_RE.search(text):

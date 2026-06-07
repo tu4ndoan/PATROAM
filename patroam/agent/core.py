@@ -11,7 +11,7 @@ centrally handles two things so every frontend benefits for free:
 
 import threading
 
-from .. import actions, config, graph, rag
+from .. import actions, config, graph, llm, rag
 from ..memory import get_memory
 
 # Hold back this many trailing chars while streaming so a partial "ACTION:"
@@ -31,9 +31,38 @@ class Agent:
         self._cancel = None      # threading.Event for the in-flight request
         self._rag = ""           # retrieved document context for the current query
         self._graph = ""         # relevant knowledge-graph facts for the query
+        llm.set_completer(self.complete)   # let other subsystems use this model
 
     def set_model(self, model):
         self.model = model
+
+    def complete(self, prompt, system=None, timeout=120):
+        """Synchronous one-shot completion (no history, no actions). Returns the
+        full text, or None if no model is available or it errors/times out."""
+        if not self.model:
+            return None
+        msgs = []
+        if system:
+            msgs.append({"role": "system", "content": system})
+        msgs.append({"role": "user", "content": prompt})
+        done = threading.Event()
+        out = {"text": "", "err": None}
+
+        def on_done(full):
+            out["text"] = full
+            done.set()
+
+        def on_error(err):
+            out["err"] = err
+            done.set()
+
+        try:
+            self.provider.stream_chat(self.model, msgs, lambda t: None, on_done, on_error)
+        except Exception as e:
+            return None
+        if not done.wait(timeout) or out["err"]:
+            return None
+        return out["text"]
 
     def cancel(self):
         """Abort the current in-flight generation (e.g. the user said 'stop')."""

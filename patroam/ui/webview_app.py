@@ -11,7 +11,7 @@ import os
 import queue
 import threading
 
-from .. import config, skills
+from .. import config, graph, rag, skills
 from ..agent import Agent
 from ..providers import make_provider, pick_default
 from ..voice.listener import WakeWordListener
@@ -71,6 +71,10 @@ class Controller:
 
     def push_wake(self, on):
         self._eval(f"window.patroam.setWake({json.dumps(bool(on))})")
+
+    def _inspector_dirty(self):
+        """Tell the open inspector to reload (graph/RAG may have changed)."""
+        self._eval("window.patroam.inspectorChanged && window.patroam.inspectorChanged()")
 
     # ── chat panel push ─────────────────────────────────────────────────────────
     def _chat_user(self, text):
@@ -182,6 +186,7 @@ class Controller:
                 self.set_status(reply)
                 self._chat_done(reply)
                 self.speak(reply)
+                self._inspector_dirty()   # a skill may have changed graph/RAG
             else:
                 self._stop_now()
             return
@@ -208,6 +213,7 @@ class Controller:
             self.set_status("")
             self._chat_done(full)
             self._flush_rest()
+            self._inspector_dirty()     # the model may have recorded a relation
             if self._pending == 0:      # nothing was spoken (e.g. empty/tts off)
                 self._set_busy(False)
                 self.rest()
@@ -377,6 +383,36 @@ class JsApi:
     def set_tts(self, on):
         self._c.set_tts(on)
         return True
+
+    # ── Inspector: read-only views into RAG + the knowledge graph ──────────────
+    def get_graph(self):
+        """Triples for the knowledge-graph visualizer."""
+        try:
+            return {"triples": graph.all_triples()}
+        except Exception as e:
+            return {"triples": [], "error": str(e)}
+
+    def get_rag(self):
+        """Index status: backend, chunk count, source files."""
+        try:
+            return rag.stats()
+        except Exception as e:
+            return {"backend": f"error: {e}", "chunks": 0, "sources": []}
+
+    def rag_query(self, q):
+        """Retrieve passages for `q` — proves RAG works from the UI."""
+        try:
+            return {"hits": rag.search((q or "").strip())}
+        except Exception as e:
+            return {"hits": [], "error": str(e)}
+
+    def reindex(self):
+        """Rebuild the document index + knowledge graph from the knowledge folder."""
+        try:
+            chunks, files, triples = rag.ingest()
+            return {"chunks": chunks, "files": files, "triples": triples}
+        except Exception as e:
+            return {"chunks": 0, "files": 0, "triples": 0, "error": str(e)}
 
 
 def run(provider=None):

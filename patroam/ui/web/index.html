@@ -59,6 +59,72 @@
   .msg .who { display:block; font-size:10px; opacity:.6; margin-bottom:2px; }
   body.chat-open .bar { transform:translateX(calc(-50% - 175px)); transition:transform .25s ease; }
   @media (max-width:640px){ body.chat-open .bar { transform:translateX(-50%); } }
+
+  /* Inspector panel (RAG + knowledge graph) — salvaged glass/neon look */
+  .insp { position:fixed; top:0; left:0; height:100%; width:410px; max-width:88vw;
+    background:rgba(8,10,20,.9); border-right:1px solid rgba(123,92,255,.22);
+    backdrop-filter:blur(14px); transform:translateX(-100%); transition:transform .25s ease;
+    display:flex; flex-direction:column; z-index:6; }
+  .insp.open { transform:translateX(0); }
+  .insp-head { padding:14px 16px; display:flex; justify-content:space-between; align-items:center;
+    border-bottom:1px solid rgba(123,92,255,.15); }
+  .insp-title { font-weight:bold; letter-spacing:2px; color:#9aa8ff; text-shadow:0 0 12px rgba(123,92,255,.6); }
+  .insp-head .x { cursor:pointer; opacity:.7; }
+  .tabs { display:flex; gap:6px; padding:10px 12px 0; }
+  .tab { flex:1; text-align:center; cursor:pointer; padding:7px 0; font-size:11px; letter-spacing:1px;
+    border:1px solid rgba(123,92,255,.2); border-radius:8px; color:var(--muted); background:rgba(20,16,34,.5); }
+  .tab.sel { color:#fff; border-color:var(--accent); box-shadow:0 0 12px rgba(123,92,255,.35); }
+  .pane { flex:1; overflow:auto; padding:12px; display:none; flex-direction:column; gap:10px; }
+  .pane.sel { display:flex; }
+  .graphwrap { position:relative; width:100%; height:300px; }
+  #graphCv { width:100%; height:100%; display:block; border-radius:10px;
+    border:1px solid rgba(123,92,255,.18);
+    background:radial-gradient(120% 120% at 50% 0%, rgba(40,30,70,.5), rgba(6,5,14,.9)); }
+  .graphwrap.full { position:fixed; inset:0; width:auto; height:auto; z-index:30; }
+  .graphwrap.full #graphCv { border-radius:0; border:none;
+    background:radial-gradient(120% 120% at 50% -10%, rgba(34,24,64,.98), rgba(3,2,9,1)); }
+  .gexpand { position:absolute; top:8px; right:8px; z-index:31; cursor:pointer; font-size:14px;
+    width:28px; height:28px; line-height:26px; text-align:center; border-radius:7px;
+    background:rgba(20,16,34,.7); border:1px solid rgba(123,92,255,.3); color:#bdb6ff;
+    backdrop-filter:blur(6px); }
+  .gexpand:hover { border-color:var(--accent); box-shadow:0 0 12px rgba(123,92,255,.4); }
+  #graphCv { cursor:grab; touch-action:none; }
+  #graphCv:active { cursor:grabbing; }
+  .ghint { display:none; position:absolute; top:10px; left:14px; z-index:31; pointer-events:none;
+    font-size:11px; color:rgba(180,190,230,.7); text-shadow:0 0 8px rgba(0,0,0,.8); }
+  .graphwrap.full .ghint { display:block; }
+  .kg-overlay { display:none; position:absolute; left:14px; bottom:14px; z-index:31;
+    width:300px; max-height:62%; overflow:auto; padding:12px 14px; border-radius:12px;
+    background:rgba(10,8,18,.85); border:1px solid rgba(123,92,255,.3); backdrop-filter:blur(10px); }
+  .graphwrap.full .kg-overlay.show { display:block; }
+  .kg-detail:empty { display:none; }
+  .kg-detail { padding:10px 12px; border-radius:10px; background:rgba(20,16,34,.45);
+    border:1px solid rgba(123,92,255,.2); }
+  .detail-title { font-weight:bold; color:#cdd2ff; font-size:14px; display:flex;
+    justify-content:space-between; align-items:center; }
+  .detail-clear { cursor:pointer; color:#9aa8ff; opacity:.7; font-size:12px; padding:0 4px; }
+  .detail-clear:hover { opacity:1; color:#fff; }
+  .detail-sub { color:#7aa2ff; font-size:11px; margin:2px 0 8px; }
+  .detail-rel { font-size:12px; line-height:1.7; color:#c7cce0; }
+  .detail-rel .r { color:#7aa2ff; }
+  .detail-rel b { color:#e8ecf7; }
+  .meta { font-size:12px; color:var(--muted); }
+  .meta b { color:#9aa8ff; }
+  .chip { display:inline-block; font-size:11px; padding:2px 8px; margin:2px; border-radius:20px;
+    border:1px solid rgba(123,92,255,.3); color:#bdb6ff; }
+  .kg-list { font-size:12px; line-height:1.7; color:#c7cce0; }
+  .kg-list .rel { color:#7aa2ff; }
+  .row { display:flex; gap:8px; }
+  .row input { flex:1; }
+  .hit { border:1px solid rgba(123,92,255,.18); border-radius:10px; padding:8px 10px;
+    background:rgba(20,16,34,.4); font-size:12px; }
+  .hit .src { color:#7aa2ff; font-weight:bold; }
+  .hit .score { float:right; color:#22c55e; }
+  .hit .txt { margin-top:4px; color:#c7cce0; line-height:1.45; max-height:96px; overflow:auto; white-space:pre-wrap; }
+  .smallbtn { cursor:pointer; border:1px solid rgba(123,92,255,.3); background:rgba(30,24,48,.8);
+    color:var(--fg); border-radius:8px; padding:7px 10px; font-family:inherit; font-size:12px; white-space:nowrap; }
+  .smallbtn:hover { border-color:var(--accent); }
+  .empty { color:var(--muted); font-size:12px; text-align:center; padding:20px 0; }
 </style>
 </head>
 <body>
@@ -66,9 +132,39 @@
   <div id="ui">
     <div class="brand">⬡ PATROAM</div>
     <div class="top-right">
+      <span id="inspToggle" class="glass iconbtn" title="RAG &amp; knowledge graph inspector">🧠</span>
       <span id="chatToggle" class="glass iconbtn" title="Show/hide chat">💬</span>
       <select id="model" class="glass" title="Model"></select>
       <span id="refresh" class="glass iconbtn" title="Refresh models">⟳</span>
+    </div>
+
+    <div id="insp" class="insp">
+      <div class="insp-head"><span class="insp-title">⬡ INSPECTOR</span><span class="x" id="inspClose">✕</span></div>
+      <div class="tabs">
+        <div class="tab sel" data-tab="kg">KNOWLEDGE GRAPH</div>
+        <div class="tab" data-tab="rag">RAG</div>
+      </div>
+      <div id="pane-kg" class="pane sel">
+        <div id="graphWrap" class="graphwrap">
+          <canvas id="graphCv"></canvas>
+          <span class="gexpand" id="gExpand" title="Expand / collapse">⤢</span>
+          <div class="ghint">drag to rotate · scroll to zoom · click a node to focus · Esc to exit</div>
+          <div class="kg-overlay" id="kgOverlay"></div>
+        </div>
+        <div class="meta" id="kgMeta">Loading…</div>
+        <div class="kg-detail" id="kgDetail"></div>
+        <div class="kg-list" id="kgList"></div>
+      </div>
+      <div id="pane-rag" class="pane">
+        <div class="meta" id="ragMeta">Loading…</div>
+        <div id="ragSources"></div>
+        <div class="row">
+          <input id="ragQ" class="glass" placeholder="Test a retrieval query…" />
+          <span class="smallbtn" id="ragGo">Search</span>
+        </div>
+        <span class="smallbtn" id="ragReindex">⟳ Re-index documents</span>
+        <div id="ragHits"></div>
+      </div>
     </div>
     <div id="chat" class="chat hidden">
       <div class="chat-head"><span>Conversation</span><span class="x" id="chatClose">✕</span></div>
@@ -275,6 +371,235 @@ function applyWake(on){ wakeOn=on; $('wake').classList.toggle('on',on);
   mic.disabled=on; mic.style.opacity=on?.4:1; }
 window.patroam.setWake = applyWake;   // Python pushes the auto-start state here
 $('wake').onclick=async()=>{ if(!api())return; applyWake(await api().toggle_always_on()); };
+
+// ── Inspector (RAG + knowledge graph) ─────────────────────────────────────────
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+const insp=$('insp');
+function kgTabActive(){ return insp.classList.contains('open') && $('pane-kg').classList.contains('sel'); }
+function toggleInsp(show){ const open=show===undefined?!insp.classList.contains('open'):show;
+  insp.classList.toggle('open',open);
+  if(open){ loadGraph(); loadRag(); } else { setFull(false); stopGraphAnim(); } }
+$('inspToggle').onclick=()=>toggleInsp();
+$('inspClose').onclick=()=>toggleInsp(false);
+document.querySelectorAll('.tab').forEach(tb=>{ tb.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('sel'));
+  document.querySelectorAll('.pane').forEach(x=>x.classList.remove('sel'));
+  tb.classList.add('sel'); const t=tb.dataset.tab; $('pane-'+t).classList.add('sel');
+  if(t==='kg') loadGraph(); else { setFull(false); stopGraphAnim(); loadRag(); }
+}; });
+
+// Fullscreen: .insp has a transform + backdrop-filter, which would trap a
+// position:fixed child inside the panel. So we reparent the graph to <body>
+// while expanded (true viewport fullscreen), then restore it on collapse.
+let gwHome=null;
+function setFull(on){
+  const gw=$('graphWrap'); if(!gw) return;
+  if(on && !gw.classList.contains('full')){
+    gwHome=document.createComment('gw-home'); gw.parentNode.insertBefore(gwHome, gw);
+    document.body.appendChild(gw); gw.classList.add('full');
+  } else if(!on && gw.classList.contains('full')){
+    gw.classList.remove('full');
+    if(gwHome && gwHome.parentNode){ gwHome.parentNode.insertBefore(gw, gwHome); gwHome.remove(); }
+    gwHome=null;
+  }
+}
+$('gExpand').onclick=(e)=>{ e.stopPropagation(); setFull(!$('graphWrap').classList.contains('full')); };
+addEventListener('keydown',e=>{ if(e.key==='Escape') setFull(false); });
+
+// ── 3D knowledge graph (Canvas2D projection — rotate / drag / zoom / click) ─────
+const G={ nodes:[], edges:[], byId:{}, run:false, raf:0, t:0, hot:0, sel:null,
+  rotX:-0.18, rotY:0.5, zoom:1.1, spin:true };
+const PROJ_D=3.6;
+
+function build3D(triples){
+  const prev={}; G.nodes.forEach(n=>prev[n.id]={x:n.x,y:n.y,z:n.z,vx:n.vx,vy:n.vy,vz:n.vz});
+  const idx={}, N=[];
+  const names=[...new Set(triples.flatMap(t=>[t.s,t.o]))];
+  names.forEach((n,i)=>{ const p=prev[n]; idx[n]=i;
+    const u=Math.random()*6.283, v=Math.acos(2*Math.random()-1), rr=0.5+Math.random()*0.4;
+    N.push({ id:n, deg:0, ph:Math.random()*6.28, born:p?1:0,
+      x:p?p.x:rr*Math.sin(v)*Math.cos(u), y:p?p.y:rr*Math.cos(v), z:p?p.z:rr*Math.sin(v)*Math.sin(u),
+      vx:p?p.vx:0, vy:p?p.vy:0, vz:p?p.vz:0, sx:null, sy:null, r:3, depth:0 }); });
+  const E=triples.filter(t=>idx[t.s]!=null&&idx[t.o]!=null)
+    .map(t=>({ a:idx[t.s], b:idx[t.o], rel:t.r.replace(/_/g,' ').toLowerCase(), p:Math.random() }));
+  E.forEach(e=>{ N[e.a].deg++; N[e.b].deg++; });
+  G.nodes=N; G.edges=E; G.byId={}; N.forEach(n=>G.byId[n.id]=n); G.hot=1;
+  if(G.sel && !G.byId[G.sel]) G.sel=null;
+}
+
+function step3D(){
+  const N=G.nodes, E=G.edges;
+  for(let i=0;i<N.length;i++){ const a=N[i];
+    for(let j=i+1;j<N.length;j++){ const b=N[j];
+      let dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z, d2=dx*dx+dy*dy+dz*dz||0.001, d=Math.sqrt(d2);
+      const rep=0.3/d2, fx=dx/d*rep, fy=dy/d*rep, fz=dz/d*rep;
+      a.vx+=fx;a.vy+=fy;a.vz+=fz; b.vx-=fx;b.vy-=fy;b.vz-=fz; }
+    a.vx+=-a.x*0.02; a.vy+=-a.y*0.02; a.vz+=-a.z*0.02; }
+  const L=0.72;
+  for(const e of E){ const a=N[e.a], b=N[e.b];
+    let dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,d=Math.hypot(dx,dy,dz)||0.001,f=(d-L)*0.04;
+    const fx=dx/d*f,fy=dy/d*f,fz=dz/d*f;
+    a.vx+=fx;a.vy+=fy;a.vz+=fz; b.vx-=fx;b.vy-=fy;b.vz-=fz; }
+  const cap=G.hot>0.02?0.06:0.018;
+  for(const a of N){ a.vx*=0.85;a.vy*=0.85;a.vz*=0.85;
+    a.x+=Math.max(-cap,Math.min(cap,a.vx)); a.y+=Math.max(-cap,Math.min(cap,a.vy)); a.z+=Math.max(-cap,Math.min(cap,a.vz));
+    // Keep nodes inside a safe sphere so projection can never blow up.
+    a.x=Math.max(-2,Math.min(2,a.x)); a.y=Math.max(-2,Math.min(2,a.y)); a.z=Math.max(-2,Math.min(2,a.z));
+    if(a.born<1) a.born=Math.min(1,a.born+0.04); }
+  G.hot*=0.97;
+}
+
+function render3D(){
+  const gcv=$('graphCv'), x=gcv.getContext('2d');
+  const rect=gcv.getBoundingClientRect(), dpr=Math.min(devicePixelRatio||1,2);
+  const w=Math.round(rect.width*dpr), h=Math.round(rect.height*dpr);
+  if(gcv.width!==w||gcv.height!==h){ gcv.width=w; gcv.height=h; }
+  x.setTransform(dpr,0,0,dpr,0,0);
+  const W=rect.width, H=rect.height; x.clearRect(0,0,W,H);
+  if(!G.nodes.length){ x.fillStyle='#6b7488'; x.font='13px monospace'; x.textAlign='center';
+    x.fillText('Knowledge graph is empty.', W/2, H/2); return; }
+  if(G.hot>0.03) step3D();   // settle, then freeze positions so nodes stop shaking
+  // Rotation: focus on the selected node, else slow auto-spin (like the orb).
+  const selN=G.sel?G.byId[G.sel]:null;
+  if(selN && !gDrag && G.focus){ const rr=Math.hypot(selN.x,selN.z);
+    const tY=Math.atan2(-selN.x, selN.z||0.001), tX=Math.atan2(selN.y, rr||0.001);
+    G.rotY+=(tY-G.rotY)*0.07; G.rotX+=(tX-G.rotX)*0.07;
+    if(Math.abs(tY-G.rotY)<0.01 && Math.abs(tX-G.rotX)<0.01) G.focus=false; }
+  else if(!G.sel && G.spin && !gDrag){ G.rotY+=0.0016; }
+  const full=$('graphWrap').classList.contains('full');
+  const cx=W/2, cy=H/2, scale=Math.min(W,H)*0.34*G.zoom;
+  const cosX=Math.cos(G.rotX), sinX=Math.sin(G.rotX), cosY=Math.cos(G.rotY), sinY=Math.sin(G.rotY);
+  for(const n of G.nodes){ const x1=n.x*cosY+n.z*sinY, z1=-n.x*sinY+n.z*cosY;
+    const y2=n.y*cosX-z1*sinX, z2=n.y*sinX+z1*cosX;
+    const persp=PROJ_D/Math.max(1.0, PROJ_D-z2);   // clamp denom → persp always finite & positive
+    n.sx=cx+x1*persp*scale; n.sy=cy-y2*persp*scale; n.depth=z2;
+    n.r=Math.max(0.6,(3.2+Math.min(8,n.deg*1.3))*persp*(full?1.35:1)*(0.4+0.6*n.born)); }
+  // Neighbour set of the selection (for focus highlighting).
+  let neigh=null;
+  if(G.sel){ neigh=new Set([G.sel]); G.edges.forEach(e=>{ const a=G.nodes[e.a].id,b=G.nodes[e.b].id;
+    if(a===G.sel)neigh.add(b); if(b===G.sel)neigh.add(a); }); }
+  // Edges + flowing particles (additive glow).
+  x.globalCompositeOperation='lighter';
+  for(const e of G.edges){ const a=G.nodes[e.a], b=G.nodes[e.b];
+    const on=!G.sel || a.id===G.sel || b.id===G.sel;
+    const al=G.sel?(on?0.7:0.04):0.4;
+    const grd=x.createLinearGradient(a.sx,a.sy,b.sx,b.sy);
+    grd.addColorStop(0,'rgba(80,150,255,'+al+')'); grd.addColorStop(1,'rgba(176,96,255,'+al+')');
+    x.strokeStyle=grd; x.lineWidth=(on&&G.sel?1.9:1.1)*(full?1.2:1);
+    x.beginPath(); x.moveTo(a.sx,a.sy); x.lineTo(b.sx,b.sy); x.stroke();
+    if(on){ e.p=(e.p+0.005)%1; const px=a.sx+(b.sx-a.sx)*e.p, py=a.sy+(b.sy-a.sy)*e.p;
+      x.fillStyle='rgba(190,215,255,.95)'; x.beginPath(); x.arc(px,py,full?2.4:1.8,0,6.2832); x.fill(); }
+    if((full||G.sel) && on){ x.globalCompositeOperation='source-over';
+      x.fillStyle='rgba(160,176,255,.75)'; x.font='10px monospace'; x.textAlign='center';
+      x.fillText(e.rel,(a.sx+b.sx)/2,(a.sy+b.sy)/2-3); x.globalCompositeOperation='lighter'; } }
+  // Nodes, drawn back-to-front. Haloes first (additive), then crisp cores.
+  const order=[...G.nodes].sort((p,q)=>p.depth-q.depth);
+  for(const n of order){ const dim=G.sel && !neigh.has(n.id);
+    const pulse=0.6+0.4*Math.sin(G.t*0.05+n.ph);
+    const a=(dim?0.1:0.85)*pulse*n.born;
+    const col=(n.id===G.sel)?'255,150,90':'150,120,255';
+    const halo=x.createRadialGradient(n.sx,n.sy,0,n.sx,n.sy,n.r*3.4);
+    halo.addColorStop(0,'rgba('+col+','+a+')'); halo.addColorStop(1,'rgba('+col+',0)');
+    x.fillStyle=halo; x.beginPath(); x.arc(n.sx,n.sy,n.r*3.4,0,6.2832); x.fill(); }
+  x.globalCompositeOperation='source-over';
+  for(const n of order){ const dim=G.sel && !neigh.has(n.id);
+    const rr=n.r*(n.id===G.sel?1.5:1);
+    x.fillStyle=(n.id===G.sel)?'rgba(255,214,176,'+n.born+')':'rgba(232,236,255,'+(dim?0.22:1)*n.born+')';
+    x.beginPath(); x.arc(n.sx,n.sy,rr,0,6.2832); x.fill();
+    const showLab=(full || !G.sel || neigh.has(n.id)) && !dim;
+    if(showLab){ x.fillStyle='rgba(223,227,255,'+n.born+')'; x.font=(full?'12px':'10px')+' monospace'; x.textAlign='center';
+      const lab=n.id.length>(full?30:16)?n.id.slice(0,(full?29:15))+'…':n.id;
+      x.fillText(lab, n.sx, n.sy-rr-5); } }
+}
+
+function gLoop(){
+  if(!G.run){ G.raf=0; return; }
+  G.raf=requestAnimationFrame(gLoop);          // schedule FIRST — a render error can't kill the loop
+  try { G.t++; render3D(); } catch(err){ if(window.console) console.error('graph render error', err); }
+}
+function startGraphAnim(){ G.run=true; if(!G.raf) G.raf=requestAnimationFrame(gLoop); }  // restart even if a prior loop died
+function stopGraphAnim(){ G.run=false; if(G.raf) cancelAnimationFrame(G.raf); G.raf=0; }
+
+// Interaction: drag to rotate, wheel to zoom, click a node to focus.
+const gcvEl=$('graphCv');
+let gDrag=false, gMoved=false, gLX=0, gLY=0, gSpinTO=null;
+gcvEl.addEventListener('pointerdown', e=>{ gDrag=true; gMoved=false; G.spin=false; gLX=e.clientX; gLY=e.clientY; });
+addEventListener('pointermove', e=>{ if(!gDrag)return; const dx=e.clientX-gLX, dy=e.clientY-gLY;
+  if(Math.abs(dx)+Math.abs(dy)>3) gMoved=true;
+  G.rotY+=dx*0.008; G.rotX=Math.max(-1.45,Math.min(1.45,G.rotX+dy*0.008)); gLX=e.clientX; gLY=e.clientY; });
+addEventListener('pointerup', e=>{ if(!gDrag)return; gDrag=false;
+  if(!gMoved) pickAt(e.clientX, e.clientY);
+  clearTimeout(gSpinTO); gSpinTO=setTimeout(()=>{ G.spin=true; }, 2500); });
+gcvEl.addEventListener('wheel', e=>{ e.preventDefault();
+  G.zoom=Math.max(0.5,Math.min(3.2,G.zoom*(1-e.deltaY*0.0012))); }, {passive:false});
+
+function pickAt(clientX, clientY){
+  const rect=gcvEl.getBoundingClientRect(), mx=clientX-rect.left, my=clientY-rect.top;
+  let best=null, bestD=1e9;
+  for(const n of G.nodes){ if(n.sx==null)continue; const d=Math.hypot(n.sx-mx, n.sy-my);
+    if(d<Math.max(15, n.r+7) && d<bestD){ bestD=d; best=n; } }
+  if(best) selectNode(best.id); else clearSel();
+}
+function selectNode(id){ G.sel=id; G.focus=true; renderDetail(); }
+function clearSel(){ G.sel=null; renderDetail(); }
+
+function renderDetail(){
+  const dEl=$('kgDetail'), oEl=$('kgOverlay');
+  if(!G.sel){ dEl.innerHTML=''; oEl.innerHTML=''; oEl.classList.remove('show'); return; }
+  const out=[], inc=[];
+  G.edges.forEach(e=>{ const a=G.nodes[e.a].id, b=G.nodes[e.b].id;
+    if(a===G.sel) out.push({rel:e.rel, other:b});
+    if(b===G.sel) inc.push({rel:e.rel, other:a}); });
+  const deg=out.length+inc.length;
+  let html='<div class="detail-title">'+esc(G.sel)+'<span class="detail-clear">✕</span></div>'+
+    '<div class="detail-sub">'+deg+' connection'+(deg!==1?'s':'')+'</div><div class="detail-rel">';
+  out.forEach(c=> html+='<b>'+esc(G.sel)+'</b> <span class="r">'+esc(c.rel)+'</span> '+esc(c.other)+'<br>');
+  inc.forEach(c=> html+=esc(c.other)+' <span class="r">'+esc(c.rel)+'</span> <b>'+esc(G.sel)+'</b><br>');
+  if(!deg) html+='No connections recorded yet.';
+  html+='</div>';
+  dEl.innerHTML=html; oEl.innerHTML=html; oEl.classList.add('show');
+  [dEl,oEl].forEach(el=>{ const c=el.querySelector('.detail-clear'); if(c) c.onclick=clearSel; });
+}
+
+async function loadGraph(){ if(!api())return;
+  const r=await api().get_graph(), tr=(r&&r.triples)||[];
+  build3D(tr); startGraphAnim(); renderDetail();
+  $('kgMeta').innerHTML='<b>'+tr.length+'</b> relationships · <b>'+
+    new Set(tr.flatMap(t=>[t.s,t.o])).size+'</b> entities · <span style="opacity:.6">drag · scroll · click a node</span>';
+  $('kgList').innerHTML = tr.length ? tr.map(t=>
+    esc(t.s)+' <span class="rel">'+esc(t.r.replace(/_/g,' ').toLowerCase())+'</span> '+esc(t.o)).join('<br>')
+    : '<div class="empty">No facts yet. Say e.g. "remember that Orion uses Postgres", or "connect Orion to Helios".</div>';
+}
+
+async function loadRag(){ if(!api())return;
+  const r=(await api().get_rag())||{};
+  $('ragMeta').innerHTML='Backend: <b>'+esc(r.backend||'unknown')+'</b> · <b>'+(r.chunks||0)+'</b> chunks';
+  $('ragSources').innerHTML=(r.sources&&r.sources.length)
+    ? r.sources.map(s=>'<span class="chip">'+esc(s)+'</span>').join('')
+    : '<div class="empty">No documents indexed. Drop files in your PATROAM knowledge folder, then Re-index.</div>';
+}
+
+async function ragSearch(){ if(!api())return; const q=$('ragQ').value.trim(); if(!q)return;
+  $('ragHits').innerHTML='<div class="empty">Searching…</div>';
+  const r=await api().rag_query(q), hits=(r&&r.hits)||[];
+  $('ragHits').innerHTML = hits.length ? hits.map(h=>
+    '<div class="hit"><span class="src">'+esc(h.source||'(unknown)')+'</span>'+
+    (h.score!=null?'<span class="score">'+h.score+'</span>':'')+
+    '<div class="txt">'+esc(h.text||'')+'</div></div>').join('')
+    : '<div class="empty">No matching passages found.</div>';
+}
+$('ragGo').onclick=ragSearch;
+$('ragQ').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); ragSearch(); } });
+$('ragReindex').onclick=async()=>{ if(!api())return; $('ragMeta').textContent='Re-indexing & extracting graph… (may take a moment)';
+  const r=await api().reindex(); await loadRag();
+  if(r&&!r.error) $('ragMeta').innerHTML+=' · indexed <b>'+(r.files||0)+'</b> files, <b>'+(r.triples||0)+'</b> graph facts';
+  loadGraph();   // documents may have added nodes
+};
+
+// Python calls this after each turn so the panel reflects new facts/docs live.
+window.patroam.inspectorChanged=function(){ if(!insp.classList.contains('open'))return;
+  if(kgTabActive()) loadGraph(); loadRag(); };
+
 let booted=false;
 function boot(){ if(booted)return; const a=api(); if(!a){ setTimeout(boot,120); return; }
   booted=true;

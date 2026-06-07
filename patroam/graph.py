@@ -100,3 +100,58 @@ def summary(limit=15):
     if not triples:
         return "My knowledge graph is empty so far."
     return "Here's what I know is connected: " + "; ".join(_phrase(t) for t in triples[-limit:]) + "."
+
+
+def all_triples():
+    """Every stored triple — for the inspector / visualizer (read-only copy)."""
+    return [{"s": t["s"], "r": t["r"], "o": t["o"],
+             "confidence": t.get("confidence", 1.0)} for t in _load()["triples"]]
+
+
+# ── LLM extraction (documents → triples) ──────────────────────────────────────────
+_EXTRACT_PROMPT = (
+    "You are an information-extraction engine. From the text below, extract a "
+    "knowledge graph of the explicit relationships between entities (people, "
+    "projects, companies, technologies, products, places, documents).\n"
+    "Return ONLY valid JSON, no prose, in exactly this shape:\n"
+    '{"triples":[{"subject":"...","relation":"USES","object":"..."}]}\n'
+    "Use SHORT canonical entity names (drop articles like 'the'). Prefer these "
+    "relations when they fit: USES, OWNS, DEPENDS_ON, IMPLEMENTS, PART_OF, "
+    "CREATED_BY, WORKS_FOR, RELATED_TO, BLOCKED_BY. Only include relationships "
+    "the text actually states. If there are none, return {\"triples\":[]}.\n\n"
+    "TEXT:\n"
+)
+
+
+def _parse_json(raw):
+    """Best-effort JSON extraction from a model reply (tolerates surrounding prose)."""
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    i, j = raw.find("{"), raw.rfind("}")
+    if i >= 0 and j > i:
+        try:
+            return json.loads(raw[i:j + 1])
+        except Exception:
+            return {}
+    return {}
+
+
+def extract_into(text, complete, max_chars=6000):
+    """Use `complete(prompt)->str` to pull triples from `text` into the graph.
+    Returns the number of triples added."""
+    if not text or not text.strip() or complete is None:
+        return 0
+    raw = complete(_EXTRACT_PROMPT + text[:max_chars])
+    data = _parse_json(raw)
+    added = 0
+    for t in (data.get("triples") or []):
+        if not isinstance(t, dict):
+            continue
+        if add(t.get("subject", ""), t.get("relation", "RELATED_TO"), t.get("object", ""),
+               confidence=0.8):
+            added += 1
+    return added

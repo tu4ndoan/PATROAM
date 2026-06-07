@@ -33,7 +33,7 @@ with open(os.path.join(config.KNOWLEDGE_DIR, "orion.md"), "w", encoding="utf-8")
             "The Orion app stores its data in SQLite and uses JWT for authentication.\n"
             "It targets iOS 17. The team standup is on Mondays.\n")
 
-n, m = rag.ingest()
+n, m, _ = rag.ingest()
 backend = ("ChromaDB (real vector DB)" if rag._use_chroma()
            else "JSON + " + ("Ollama embeddings" if config.EMBED_MODEL else "keyword search"))
 print(f"\n[RAG]  indexed {n} passage(s) from {m} document(s)")

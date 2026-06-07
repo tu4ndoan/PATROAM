@@ -96,8 +96,28 @@ def ensure_dir():
             pass
 
 
-def ingest():
-    """(Re)build the index from KNOWLEDGE_DIR. Returns (chunks, files)."""
+def _build_graph(docs, llm):
+    """Extract a knowledge graph from documents using the active model.
+    `docs` is [(source, full_text)]. Returns triples added."""
+    from . import graph, llm as _llm
+    fn = llm if callable(llm) else (_llm.complete if _llm.available() else None)
+    if fn is None:
+        return 0
+    added = 0
+    for _src, full in docs:
+        # Cover the document in a few windows so long files aren't truncated away,
+        # but cap total windows per doc to bound time/cost.
+        for w in range(0, min(len(full), 6000 * 4), 6000):
+            added += graph.extract_into(full[w:w + 6000], fn)
+    return added
+
+
+def ingest(llm=None):
+    """(Re)build the index from KNOWLEDGE_DIR, and (if a model is available)
+    extract a knowledge graph from the documents. Returns (chunks, files, triples).
+
+    `llm` is an optional (prompt, system=None)->str completion function; when
+    omitted, the active model registered via patroam.llm is used if present."""
     global _CACHE
     ensure_dir()
     files = []
@@ -108,12 +128,18 @@ def ingest():
             if os.path.splitext(fn)[1].lower() in _TEXT_EXT:
                 files.append(os.path.join(dp, fn))
 
-    # Gather chunks (without embeddings yet).
+    # Read each file once: keep the full text (for graph extraction) and chunk it.
     pieces = []   # (text, source)
+    docs = []     # (source, full_text)
     for path in files:
         rel = os.path.relpath(path, config.KNOWLEDGE_DIR)
-        for piece in _chunk(_read_file(path)):
+        full = _read_file(path)
+        docs.append((rel, full))
+        for piece in _chunk(full):
             pieces.append((piece, rel))
+
+    # Build the knowledge graph from the documents (LLM extraction).
+    triples = _build_graph(docs, llm)
 
     # Preferred path: a real vector database (ChromaDB) with Ollama embeddings.
     if pieces and _use_chroma():
@@ -136,7 +162,7 @@ def ingest():
                 _CACHE = {"chunks": [], "backend": "chroma"}
                 with open(config.RAG_INDEX_FILE, "w", encoding="utf-8") as f:
                     json.dump(_CACHE, f)
-                return len(pieces), len(files)
+                return len(pieces), len(files), triples
             except Exception:
                 pass   # fall through to the JSON store
 
@@ -148,7 +174,7 @@ def ingest():
             json.dump(_CACHE, f)
     except Exception:
         pass
-    return len(chunks), len(files)
+    return len(chunks), len(files), triples
 
 
 def _load():
@@ -216,6 +242,69 @@ def _score_lex(qwords, text):
         return 0.0
     words = set(_WORD.findall(text.lower()))
     return sum(1 for w in qwords if w in words) / len(qwords)
+
+
+def stats():
+    """Snapshot of the current index for the inspector: backend, chunk count, sources."""
+    if _use_chroma():
+        try:
+            col = _chroma_col()
+            cnt = col.count()
+            if cnt:
+                got = col.get()
+                metas = got.get("metadatas") or []
+                sources = sorted({(m or {}).get("source", "") for m in metas if m})
+                return {"backend": "ChromaDB (vector DB)", "chunks": cnt,
+                        "sources": [s for s in sources if s]}
+        except Exception:
+            pass
+    chunks = _load().get("chunks", [])
+    sources = sorted({c.get("source", "") for c in chunks})
+    if not chunks:
+        backend = "empty — no documents indexed yet"
+    elif any(c.get("emb") for c in chunks):
+        backend = "JSON index + embeddings"
+    else:
+        backend = "JSON index (keyword search)"
+    return {"backend": backend, "chunks": len(chunks),
+            "sources": [s for s in sources if s]}
+
+
+def search(query, k=None):
+    """Like retrieve() but keeps the relevance score — used by the inspector to
+    prove retrieval works. Returns [{text, source, score}]."""
+    k = k or config.RAG_TOP_K
+    if _use_chroma():
+        try:
+            col = _chroma_col()
+            if col.count() > 0:
+                qe = _embed(query)
+                if qe:
+                    res = col.query(query_embeddings=[qe], n_results=k)
+                    docs = (res.get("documents") or [[]])[0]
+                    metas = (res.get("metadatas") or [[]])[0]
+                    dists = (res.get("distances") or [[]])[0]
+                    out = []
+                    for i, d in enumerate(docs):
+                        dist = dists[i] if i < len(dists) else None
+                        score = round(max(0.0, 1 - dist), 3) if dist is not None else None
+                        src = (metas[i] or {}).get("source", "") if i < len(metas) else ""
+                        out.append({"text": d, "source": src, "score": score})
+                    return out
+        except Exception:
+            pass
+    chunks = _load().get("chunks", [])
+    if not chunks:
+        return []
+    qemb = _embed(query) if any(c.get("emb") for c in chunks) else None
+    if qemb:
+        scored = [(_cosine(qemb, c.get("emb")), c) for c in chunks]
+    else:
+        qwords = set(_WORD.findall(query.lower()))
+        scored = [(_score_lex(qwords, c["text"]), c) for c in chunks]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [{"text": c["text"], "source": c.get("source", ""), "score": round(s, 3)}
+            for s, c in scored[:k] if s > 0]
 
 
 def context_for(query, k=None, max_chars=2200):

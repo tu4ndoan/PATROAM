@@ -72,9 +72,10 @@ def _start_rag():
                 f != "README.txt"
                 for _, _, fs in os.walk(config.KNOWLEDGE_DIR) for f in fs)
             if has_docs and not os.path.exists(config.RAG_INDEX_FILE):
-                n, m = rag.ingest()
+                n, m, t = rag.ingest()
                 if n:
-                    print(f"[rag] indexed {n} passages from {m} documents")
+                    print(f"[rag] indexed {n} passages from {m} documents"
+                          + (f", extracted {t} graph facts" if t else ""))
         except Exception as e:
             print(f"RAG startup skipped: {e}")
     threading.Thread(target=work, daemon=True).start()
