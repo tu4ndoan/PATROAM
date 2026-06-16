@@ -30,7 +30,17 @@ _FIRST_PERSON = {"i", "me", "my", "myself", "mine"}
 
 def _norm(entity):
     e = (entity or "").strip()
-    return USER if e.lower() in _FIRST_PERSON else e
+    if e.lower() in _FIRST_PERSON:
+        return USER
+    # Canonicalise display so "Pham_Nhat_Vuong" and "Pham Nhat Vuong" don't
+    # become two separate nodes: underscores → spaces, collapse whitespace.
+    return re.sub(r"\s+", " ", e.replace("_", " ")).strip()
+
+
+def _canon(name):
+    """A loose key for spotting the SAME entity written differently
+    (case / underscores / hyphens / spacing)."""
+    return re.sub(r"[\s_\-]+", " ", (name or "").lower()).strip()
 
 
 def _load():
@@ -54,7 +64,9 @@ def _save():
         pass
 
 
-def add(subject, relation, obj, confidence=1.0):
+def add(subject, relation, obj, confidence=1.0, doc=None):
+    """Add a triple. `doc` is the source document (for grouping/clustering in the
+    visualizer); None means it came from you/conversation."""
     s = _norm(subject)
     r = (relation or "").strip().upper().replace(" ", "_")
     o = _norm(obj)
@@ -65,9 +77,14 @@ def add(subject, relation, obj, confidence=1.0):
         if t["s"].lower() == s.lower() and t["r"] == r and t["o"].lower() == o.lower():
             t["confidence"] = confidence
             t["ts"] = time.time()
+            if doc:
+                t["doc"] = doc
             _save()
             return True
-    triples.append({"s": s, "r": r, "o": o, "confidence": confidence, "ts": time.time()})
+    new = {"s": s, "r": r, "o": o, "confidence": confidence, "ts": time.time()}
+    if doc:
+        new["doc"] = doc
+    triples.append(new)
     _load()["triples"] = triples[-MAX_TRIPLES:]
     _save()
     return True
@@ -99,6 +116,132 @@ def forget(entity):
     g = _load()
     before = len(g["triples"])
     g["triples"] = [t for t in g["triples"] if e not in t["s"].lower() and e not in t["o"].lower()]
+    removed = before - len(g["triples"])
+    if removed:
+        _save()
+    return removed
+
+
+# ── merging duplicate nodes ───────────────────────────────────────────────────────
+def _dedupe(g):
+    """Drop self-loops and collapse identical triples (keeping the latest)."""
+    seen, out = {}, []
+    for t in g["triples"]:
+        if t["s"].lower() == t["o"].lower():
+            continue                         # a node related to itself: meaningless
+        key = (t["s"].lower(), t["r"], t["o"].lower())
+        if key in seen:
+            if t.get("ts", 0) >= seen[key].get("ts", 0):
+                seen[key]["confidence"] = max(seen[key].get("confidence", 1.0),
+                                              t.get("confidence", 1.0))
+            continue
+        seen[key] = t
+        out.append(t)
+    g["triples"] = out
+
+
+def merge(source, target):
+    """Merge the `source` node into `target`: every connection of `source` (as
+    subject OR object) is re-pointed to `target`, then duplicates/self-loops are
+    cleaned. No connections are lost. Source is matched LOOSELY (any spelling /
+    case / underscores), so old variants already in the graph are caught.
+    Returns the number of triples updated."""
+    src_c, tgt = _canon(source), _norm(target)
+    if not src_c or not tgt:
+        return 0
+    g = _load()
+    changed = 0
+    for t in g["triples"]:
+        hit = False
+        if _canon(t["s"]) == src_c and t["s"] != tgt:
+            t["s"], hit = tgt, True
+        if _canon(t["o"]) == src_c and t["o"] != tgt:
+            t["o"], hit = tgt, True
+        if hit:
+            changed += 1
+    if changed:
+        _dedupe(g)
+        _save()
+    return changed
+
+
+def rename(old, new):
+    """Rename a node everywhere (subject & object), then dedupe. Loose match on
+    `old` (any spelling). Returns triples changed."""
+    oc, newname = _canon(old), _norm(new)
+    if not oc or not newname:
+        return 0
+    g = _load()
+    changed = 0
+    for t in g["triples"]:
+        hit = False
+        if _canon(t["s"]) == oc:
+            t["s"], hit = newname, True
+        if _canon(t["o"]) == oc:
+            t["o"], hit = newname, True
+        if hit:
+            changed += 1
+    if changed:
+        _dedupe(g)
+        _save()
+    return changed
+
+
+def _entities():
+    seen, out = set(), []
+    for t in _load()["triples"]:
+        for n in (t["s"], t["o"]):
+            if n not in seen:
+                seen.add(n)
+                out.append(n)
+    return out
+
+
+def _pick_canonical(variants):
+    """Choose the nicest display form among duplicates: prefer spaced (no
+    underscore) names, then proper-case ('Trump') over ALL-CAPS or lowercase,
+    then the longer form."""
+    pool = [v for v in variants if "_" not in v] or variants
+
+    def score(v):
+        letters = [c for c in v if c.isalpha()]
+        has_upper = any(c.isupper() for c in letters)
+        all_upper = bool(letters) and all(c.isupper() for c in letters)
+        return (has_upper and not all_upper, has_upper, len(v))
+
+    return max(pool, key=score)
+
+
+def merge_duplicates():
+    """Auto-merge nodes that are the same entity in different syntax (case /
+    underscores / spacing). Returns a list of (kept, [merged_away, …])."""
+    groups = {}
+    for n in _entities():
+        groups.setdefault(_canon(n), []).append(n)
+    merges = []
+    for variants in groups.values():
+        if len(variants) < 2:
+            continue
+        keep = _pick_canonical(variants)
+        for v in variants:
+            if v != keep:
+                merge(v, keep)
+        merges.append((keep, [v for v in variants if v != keep]))
+    return merges
+
+
+def clear(keep_user=True):
+    """Wipe the knowledge graph. By default KEEPS your personal memory (facts on
+    the 'You' node) and removes everything else (e.g. garbled document facts).
+    Pass keep_user=False to wipe absolutely everything. Returns count removed."""
+    g = _load()
+    before = len(g["triples"])
+    if keep_user:
+        u = USER.lower()
+        g["triples"] = [t for t in g["triples"]
+                        if t["s"].lower() == u or t["o"].lower() == u]
+    else:
+        g["triples"] = []
     removed = before - len(g["triples"])
     if removed:
         _save()
@@ -170,7 +313,8 @@ def user_summary(limit=12):
 def all_triples():
     """Every stored triple — for the inspector / visualizer (read-only copy)."""
     return [{"s": t["s"], "r": t["r"], "o": t["o"],
-             "confidence": t.get("confidence", 1.0)} for t in _load()["triples"]]
+             "confidence": t.get("confidence", 1.0),
+             "doc": t.get("doc")} for t in _load()["triples"]]
 
 
 # ── LLM extraction (documents → triples) ──────────────────────────────────────────
@@ -205,9 +349,9 @@ def _parse_json(raw):
     return {}
 
 
-def extract_into(text, complete, max_chars=6000):
+def extract_into(text, complete, max_chars=6000, doc=None):
     """Use `complete(prompt)->str` to pull triples from `text` into the graph.
-    Returns the number of triples added."""
+    `doc` tags them with their source document (for clustering). Returns count."""
     if not text or not text.strip() or complete is None:
         return 0
     raw = complete(_EXTRACT_PROMPT + text[:max_chars])
@@ -217,6 +361,6 @@ def extract_into(text, complete, max_chars=6000):
         if not isinstance(t, dict):
             continue
         if add(t.get("subject", ""), t.get("relation", "RELATED_TO"), t.get("object", ""),
-               confidence=0.8):
+               confidence=0.8, doc=doc):
             added += 1
     return added

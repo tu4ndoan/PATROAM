@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+import unicodedata
 import urllib.request
 
 from . import config
@@ -22,18 +23,54 @@ _CACHE = None
 
 
 # ── reading & chunking ──────────────────────────────────────────────────────────
+def _pdf_text(path):
+    """Extract text from a PDF. Prefers PyMuPDF (much better Unicode handling for
+    Vietnamese/CJK), falling back to pypdf."""
+    # 1) PyMuPDF (fitz) — best Unicode extraction.
+    try:
+        import fitz  # PyMuPDF
+        try:
+            with fitz.open(path) as doc:
+                text = "\n".join(pg.get_text() for pg in doc)
+            if text.strip():
+                return text
+        except Exception as e:
+            print(f"[rag] PyMuPDF failed on {path}: {e}")
+    except ImportError:
+        pass
+    # 2) pypdf fallback.
+    try:
+        import pypdf
+    except ImportError:
+        print("[rag] cannot index PDF — install pymupdf or pypdf:", path)
+        return ""
+    try:
+        return "\n".join((pg.extract_text() or "") for pg in pypdf.PdfReader(path).pages)
+    except Exception as e:
+        print(f"[rag] failed to read PDF {path}: {e}")
+        return ""
+
+
 def _read_file(path):
     if path.lower().endswith(".pdf"):
+        text = _pdf_text(path)
+        if not text.strip():
+            print("[rag] PDF has no extractable text (scanned image? needs OCR):", path)
+    else:
         try:
-            import pypdf
-            return "\n".join((pg.extract_text() or "") for pg in pypdf.PdfReader(path).pages)
+            with open(path, encoding="utf-8", errors="ignore") as f:
+                text = f.read()
         except Exception:
             return ""
-    try:
-        with open(path, encoding="utf-8", errors="ignore") as f:
-            return f.read()
-    except Exception:
-        return ""
+    text = text or ""
+    # Legacy VNI-Win PDFs (e.g. "VNI-Helve" fonts) extract as garbage like
+    # "Chuû nhieäm boä moân" — decode them back to real Unicode Vietnamese.
+    from . import vni
+    if vni.looks_like_vni(text):
+        text = vni.from_vni(text)
+    # Compose diacritics (NFC) so Vietnamese is single code points, not
+    # base-letter + separate combining marks (which extract & render wrongly).
+    return unicodedata.normalize("NFC", text)
 
 
 def _chunk(text, size=800, overlap=120):
@@ -104,11 +141,11 @@ def _build_graph(docs, llm):
     if fn is None:
         return 0
     added = 0
-    for _src, full in docs:
+    for src, full in docs:
         # Cover the document in a few windows so long files aren't truncated away,
         # but cap total windows per doc to bound time/cost.
         for w in range(0, min(len(full), 6000 * 4), 6000):
-            added += graph.extract_into(full[w:w + 6000], fn)
+            added += graph.extract_into(full[w:w + 6000], fn, doc=src)
     return added
 
 

@@ -47,6 +47,11 @@ class LocalVoice:
         text = text.strip()
         if not text:
             return
+        if config.skip_in_speech(text):
+            return                       # don't read protocol scaffolding aloud
+        text = config.strip_urls(text)   # never read links aloud
+        if not text:
+            return
         if self._pending == 0:
             self._emit("state", "speaking")
             self._set_busy(True)          # keep the session alive while speaking
@@ -113,8 +118,9 @@ class LocalVoice:
         reply = skills.try_handle(text)
         if reply is not None:
             if reply:
-                print(reply)
-                self._speak(reply)
+                say, show = skills.split_reply(reply)
+                print(show)
+                self._speak(say)
             else:
                 self._stop_now()
             return

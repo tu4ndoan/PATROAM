@@ -29,6 +29,10 @@ class Agent:
         self._cancel = None      # threading.Event for the in-flight request
         self._rag = ""           # retrieved document context for the current query
         self._graph = ""         # relevant knowledge-graph facts for the query
+        self._images = None      # base64 image(s) attached to the current turn only
+        self.acted = False       # did the last request execute any tool/action?
+        self.files_made = []     # files created this request (for clickable UI links)
+        self.ask_widget = None   # {question, options} when the model asks the user
         llm.set_completer(self.complete)   # let other subsystems use this model
 
     def set_model(self, model):
@@ -73,6 +77,9 @@ class Agent:
     def _system(self):
         # Persona + how to use tools + what we remember + retrieved documents.
         parts = [self.base_system, actions.tools_prompt(), graph.render_profile()]
+        lang = config.language_directive()
+        if lang:
+            parts.append(lang)
         if self._graph:
             parts.append(self._graph)
         if self._rag:
@@ -82,12 +89,19 @@ class Agent:
     def _messages(self):
         return [{"role": "system", "content": self._system()}] + self.history
 
-    def send(self, text, on_token, on_done, on_error):
+    def send(self, text, on_token, on_done, on_error, images=None, model=None):
         """Stream the reply, hide ACTION directives from the user, run them, and —
         if a tool returned data — feed it back and continue until the model has a
-        final spoken answer."""
+        final spoken answer. `images` (base64) are sent to a vision model for this
+        turn only (not stored in history). `model` overrides the model for this
+        request (e.g. a Claude vision model for image queries)."""
         self.history.append({"role": "user", "content": text})
         self._cancel = threading.Event()
+        self._images = images or None
+        self._req_model = model or self.model
+        self.acted = False
+        self.files_made = []
+        self.ask_widget = None
         # Passively learn relationships the user states ("Trump is handsome").
         self._learn(text)
         # Retrieve relevant passages from the user's documents + graph facts.
@@ -132,6 +146,8 @@ class Agent:
                 return
             forward(full, final=True)              # flush the held tail
             spoken, acts = actions.split(full)
+            if acts:
+                self.acted = True                  # the model used a tool this turn
             self.history.append({"role": "assistant", "content": spoken})
 
             results = []
@@ -140,10 +156,19 @@ class Agent:
                     r = actions.run(name, args)
                 except Exception as e:
                     r = f"(error: {e})"
-                if isinstance(r, str):             # a data tool returned something
+                if name == "ask":                  # model wants the user to choose
+                    if isinstance(r, dict) and r.get("options"):
+                        self.ask_widget = r
+                elif name in actions.FILE_ACTIONS:  # created file(s) → for the UI, not the model
+                    if isinstance(r, list):
+                        self.files_made.extend(r)
+                    elif isinstance(r, str):
+                        self.files_made.append(r)
+                elif isinstance(r, str):           # a data tool returned something
                     results.append((name, r))
 
-            if results and rnd < _MAX_TOOL_ROUNDS:
+            # Don't loop back to the model while it's waiting on the user's choice.
+            if results and rnd < _MAX_TOOL_ROUNDS and not self.ask_widget:
                 summary = "\n".join(f"{n}: {res}" for n, res in results)
                 self.history.append({"role": "user", "content": (
                     "Results of the tool(s) you just called — use these to answer my "
@@ -153,4 +178,10 @@ class Agent:
             else:
                 on_done(spoken)
 
-        self.provider.stream_chat(self.model, self._messages(), tok, done, on_error, cancel=cancel)
+        msgs = self._messages()
+        # Attach images to the current user message for the first round only, so
+        # the vision model sees them but they never bloat the saved history.
+        if rnd == 0 and self._images and msgs and msgs[-1].get("role") == "user":
+            msgs = msgs[:-1] + [{**msgs[-1], "images": self._images}]
+        model = getattr(self, "_req_model", None) or self.model
+        self.provider.stream_chat(model, msgs, tok, done, on_error, cancel=cancel)

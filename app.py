@@ -7,9 +7,23 @@
   python app.py --daemon        # headless, 24/7, local wake-word only
 """
 
+import os
 import subprocess
 import sys
 import threading
+
+
+def _log(msg):
+    """Append a line to ~/.patroam/startup.log. pythonw (used at login) has no
+    console, so this is the only way to see what happened when PATROAM starts."""
+    try:
+        import datetime
+        d = os.path.join(os.path.expanduser("~"), ".patroam")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "startup.log"), "a", encoding="utf-8") as f:
+            f.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S}  {msg}\n")
+    except Exception:
+        pass
 
 
 def _install(pkg):
@@ -35,7 +49,10 @@ def _bootstrap():
     # offline), PATROAM still runs with the offline voice / classic window.
     for module, pkg in [("edge_tts", "edge-tts"), ("pygame", "pygame"),
                         ("webview", "pywebview"), ("anthropic", "anthropic"),
-                        ("mcp", "mcp"), ("reportlab", "reportlab")]:
+                        ("mcp", "mcp"), ("reportlab", "reportlab"),
+                        ("fitz", "pymupdf"),   # best .pdf text extraction (Unicode)
+                        ("pypdf", "pypdf"),    # .pdf fallback reader
+                        ("PIL", "Pillow")]:    # screen capture for the vision model
         try:
             __import__(module)
         except ImportError:
@@ -103,7 +120,9 @@ def _start_rag():
 
 
 def main():
+    _log(f"start argv={sys.argv[1:]} exe={sys.executable}")
     if not _acquire_single_instance():
+        _log("another instance already running — exiting")
         print("PATROAM is already running — not starting a second instance "
               "(this prevents two voices speaking at once).")
         return
@@ -132,8 +151,11 @@ def main():
     else:
         try:
             from patroam.ui.webview_app import run as run_webview
+            _log("launching desktop orb (pywebview)")
             run_webview()
         except Exception as e:
+            import traceback
+            _log("pywebview FAILED, falling back to Tk:\n" + traceback.format_exc())
             print(f"WebGL window unavailable ({e}); using the classic window.")
             _run_tk()
 

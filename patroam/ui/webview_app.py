@@ -11,7 +11,7 @@ import os
 import queue
 import threading
 
-from .. import config, graph, rag, skills
+from .. import config, files, graph, rag, skills
 from ..agent import Agent
 from ..providers import make_provider, pick_default
 from ..voice.listener import WakeWordListener
@@ -81,6 +81,11 @@ class Controller:
         self._eval("window.patroam.focusFromText && window.patroam.focusFromText("
                    + json.dumps(text or "") + ")")
 
+    def _explore_graph(self, text):
+        """Open the knowledge graph fullscreen and focus what the user asked about."""
+        self._eval("window.patroam.exploreFromText && window.patroam.exploreFromText("
+                   + json.dumps(text or "") + ")")
+
     # ── chat panel push ─────────────────────────────────────────────────────────
     def _chat_user(self, text):
         self._eval(f"window.patroam.chatUser({json.dumps(text)})")
@@ -90,6 +95,11 @@ class Controller:
 
     def _chat_done(self, text):
         self._eval(f"window.patroam.chatDone({json.dumps(text)})")
+
+    def _chat_files(self, paths):
+        """Show clickable links to files PATROAM just created."""
+        if paths:
+            self._eval(f"window.patroam.chatFiles({json.dumps(paths)})")
 
     def greet(self):
         """Speak a time-of-day greeting and log it (used on startup and on wake)."""
@@ -115,6 +125,17 @@ class Controller:
         text = text.strip()
         if not text:
             return
+        if config.skip_in_speech(text) or "```" in text:
+            return                       # don't read scaffolding or code aloud
+        text = config.strip_urls(text)   # never read links aloud
+        if not text:
+            return
+        # Summary mode (model replies): voice only the first ~SPEAK_SUMMARY_CHARS,
+        # i.e. the lead summary; the full reply still appears in the chat.
+        if getattr(self, "_summarizing", False):
+            if self._spoken_len >= config.SPEAK_SUMMARY_CHARS:
+                return
+            self._spoken_len += len(text)
         if not self.tts_enabled:
             self._set_busy(False)
             self.rest()
@@ -150,6 +171,8 @@ class Controller:
     def speak(self, text):
         self._buf = ""
         self._speaking_text = ""
+        self._summarizing = False      # skill/greeting replies are spoken in full
+        self._spoken_len = 0
         self._say_chunk(text)
 
     def _stop_now(self):
@@ -165,17 +188,17 @@ class Controller:
         self.rest()
 
     # ── request handling ──────────────────────────────────────────────────────
-    def handle(self, text):
+    def handle(self, text, images=None, echo=True):
         text = (text or "").strip()
-        if not text:
+        if not text and not images:
             return
         # "Stop" works even mid-generation — handle it before any other gate.
-        if skills.is_stop_speaking(text):
+        if text and skills.is_stop_speaking(text):
             self._stop_now()
             return
         # Barge-in: interrupt a reply in progress when the user speaks anew.
         if self._speaking:
-            if config.is_echo(self._speaking_text, text):
+            if text and config.is_echo(self._speaking_text, text):
                 return
             self.tts.interrupt()
             self._speaking = False
@@ -183,31 +206,109 @@ class Controller:
             self._buf = ""
         if self.is_responding:
             return
-        self._chat_user(text)
-        # Local commands first (e.g. "open Spotify").
-        reply = skills.try_handle(text)
-        if reply is not None:
-            if reply:
-                self.set_status(reply)
-                self._chat_done(reply)
-                self.speak(reply)
-                self._inspector_dirty()   # a skill may have changed graph/RAG
+        if echo:
+            self._chat_user(text)
+        # An attached image (dropped/pasted into the chat) → straight to the vision model.
+        if images:
+            from .. import vision
+            imgs = [i for i in (vision.normalize_image_b64(i) for i in images) if i]
+            vm = config.choose_vision_model(self.agent.provider.list_models())
+            if not vm:
+                self.set_status("No vision model available — pull qwen2.5vl or add a Claude key.")
+                self._respond(text or "Describe this image.")
+                return
+            self._respond(text or "What's in this image? Describe it.", images=imgs, model=vm)
+            return
+        # Live data fetches stay deterministic (news, ads) — reliable, no double-talk.
+        data = skills.data_handle(text)
+        if data is not None:
+            if data:
+                say, show = skills.split_reply(data)
+                self.set_status(say)
+                self._chat_done(show)     # chat shows links; speech omits them
+                self.speak(say)
                 self._focus_graph(text)
-            else:
-                self._stop_now()
             return
         if not self.agent.model:
-            self.set_status("No model selected. Is Ollama running?")
+            # No model available → fall back to deterministic commands entirely.
+            self._run_command(text, spoken="")
             return
-        self._respond(text)
+        # LLM-first: the model understands & converses; it calls tools to act, and
+        # _respond() runs the deterministic command as a fallback if it didn't.
+        want_screen = skills.wants_screen(text)
+        if skills.is_info_query(text) and not want_screen:
+            self._explore_graph(text)
+        images = None
+        req_model = None
+        if want_screen:
+            from .. import vision
+            vm = config.choose_vision_model(self.agent.provider.list_models())
+            if not vm:
+                self.set_status("No vision model available — pull qwen2.5vl or add a Claude key.")
+            else:
+                self.set_status("looking at your screen…")
+                shot = vision.screenshot_b64()
+                if shot:
+                    images = [shot]
+                    req_model = vm                       # superior VISION model
+        elif config.CODE_MODEL and skills.is_coding_query(text):
+            if config.CODE_MODEL in self.agent.provider.list_models():
+                req_model = config.CODE_MODEL            # switch to the CODING model
+        self._respond(text, images=images, model=req_model)
 
-    def _respond(self, text):
+    def _recent_ptype(self):
+        """Project type mentioned earlier in the conversation (flutter/python/…)."""
+        for m in reversed(self.agent.history[-10:]):
+            if m.get("role") == "user":
+                t = skills.project_type(m.get("content", ""))
+                if t:
+                    return t
+        return None
+
+    def _maybe_make_files(self, text, reply):
+        """After a reply: if the user wanted a project/file and the model is
+        actually proceeding (not still asking), create the files for real."""
+        asking = bool(skills.extract_choices(reply)) or reply.strip().endswith("?")
+        if asking:
+            return
+        wants = skills.wants_file(text) or skills.GO_RE.search(text or "")
+        if not wants:
+            return
+        kind = skills.project_type(text) or skills.project_type(reply) or self._recent_ptype()
+        if kind:                                   # build a real project of that type
+            name = files.guess_project_name(reply, text)
+            self.agent.files_made = files.scaffold_from_reply(kind, name, reply)
+        else:                                      # plain file(s) from the reply's code
+            self.agent.files_made = (files.save_project_from_reply(reply, text)
+                                     or files.save_code_from_reply(reply, text))
+
+    def _run_command(self, text, spoken=""):
+        """Run a deterministic command. If the model already `spoken` something,
+        only execute the side-effect (no double-talk); else speak the result."""
+        reply = skills.command_handle(text)
+        if reply is None:
+            if not spoken.strip():
+                self.set_status("No model selected. Is Ollama running?")
+            return
+        if reply == "":
+            self._stop_now()
+            return
+        say, show = skills.split_reply(reply)
+        self.set_status(say)
+        if not spoken.strip():        # the model said nothing → voice the command's reply
+            self._chat_done(show)
+            self.speak(say)
+        self._inspector_dirty()
+
+    def _respond(self, text, images=None, model=None):
         self.is_responding = True
         self.set_status("thinking…")
         self.set_state("thinking")
         self._set_busy(True)            # hold the session through thinking + speaking
         self._buf = ""
         self._speaking_text = ""
+        self._summarizing = config.SPEAK_SUMMARY   # voice only the lead summary
+        self._spoken_len = 0
 
         def on_token(t):
             self._chat_token(t)
@@ -219,6 +320,25 @@ class Controller:
             self.set_status("")
             self._chat_done(full)
             self._flush_rest()
+            # LLM-first fallback: if the model understood but didn't emit the tool
+            # call for a clear command, run it deterministically so it still happens.
+            if not self.agent.acted:
+                self._run_command(text, spoken=full)
+            # If the user wanted a file and the model wrote code (in a block) but
+            # didn't emit a write_file action, save the code block(s) ourselves.
+            if not self.agent.files_made:
+                self._maybe_make_files(text, full)
+            if self.agent.files_made:   # show clickable links to any files created
+                self._chat_files(self.agent.files_made)
+            # Show choice buttons — from the model's ask action, or detected "A or B?".
+            q, opts = "", None
+            if self.agent.ask_widget:
+                q = self.agent.ask_widget.get("question", "")
+                opts = self.agent.ask_widget.get("options", [])
+            else:
+                opts = skills.extract_choices(full)
+            if opts:
+                self._eval("window.patroam.askWidget(%s, %s)" % (json.dumps(q), json.dumps(opts)))
             self._inspector_dirty()     # the model may have recorded a relation
             self._focus_graph(text)     # focus a node the user asked about
             if self._pending == 0:      # nothing was spoken (e.g. empty/tts off)
@@ -233,7 +353,7 @@ class Controller:
 
         # Provider callbacks fire on a worker thread; pushing JS from there is
         # fine (it goes through the pump thread).
-        self.agent.send(text, on_token, on_done, on_error)
+        self.agent.send(text, on_token, on_done, on_error, images=images, model=model)
 
     # ── always-on ─────────────────────────────────────────────────────────────
     def _ensure_listener(self):
@@ -369,6 +489,13 @@ class JsApi:
         threading.Thread(target=self._c.handle, args=(text,), daemon=True).start()
         return True
 
+    def send_image(self, text, image_b64):
+        """Send a message with an image dropped/pasted into the chat. The page
+        already showed the thumbnail, so don't echo the user bubble again."""
+        threading.Thread(target=self._c.handle, args=(text,),
+                         kwargs={"images": [image_b64], "echo": False}, daemon=True).start()
+        return True
+
     def toggle_always_on(self):
         return bool(self._c.toggle_always_on())
 
@@ -390,6 +517,63 @@ class JsApi:
     def set_tts(self, on):
         self._c.set_tts(on)
         return True
+
+    def open_url(self, url):
+        """Open a link from the chat in the system browser (not inside the orb)."""
+        try:
+            import webbrowser
+            webbrowser.open((url or "").strip())
+            return True
+        except Exception:
+            return False
+
+    def open_path(self, path):
+        """Open a file PATROAM created with its default app (from a chat link)."""
+        try:
+            import os
+            os.startfile(path)   # Windows: open with the associated program
+            return True
+        except Exception:
+            try:
+                import subprocess
+                subprocess.Popen(["explorer", "/select,", path])  # fallback: reveal it
+                return True
+            except Exception:
+                return False
+
+    def copy_clipboard(self, text):
+        """Copy text (e.g. a code snippet) to the Windows clipboard. Works from
+        this worker thread without needing a browser secure-context."""
+        try:
+            import ctypes
+            from ctypes import wintypes
+            text = text or ""
+            CF_UNICODETEXT = 13
+            GMEM_MOVEABLE = 0x0002
+            u, k = ctypes.windll.user32, ctypes.windll.kernel32
+            # 64-bit-correct signatures (defaults truncate handles/pointers to 32-bit).
+            k.GlobalAlloc.restype = wintypes.HGLOBAL
+            k.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+            k.GlobalLock.restype = ctypes.c_void_p
+            k.GlobalLock.argtypes = [wintypes.HGLOBAL]
+            k.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+            u.SetClipboardData.restype = wintypes.HANDLE
+            u.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+            data = text.encode("utf-16-le") + b"\x00\x00"
+            if not u.OpenClipboard(0):
+                return False
+            try:
+                u.EmptyClipboard()
+                h = k.GlobalAlloc(GMEM_MOVEABLE, len(data))
+                p = k.GlobalLock(h)
+                ctypes.memmove(p, data, len(data))
+                k.GlobalUnlock(h)
+                u.SetClipboardData(CF_UNICODETEXT, h)
+            finally:
+                u.CloseClipboard()
+            return True
+        except Exception:
+            return False
 
     # ── Inspector: read-only views into RAG + the knowledge graph ──────────────
     def get_graph(self):
@@ -413,6 +597,27 @@ class JsApi:
         except Exception as e:
             return {"hits": [], "error": str(e)}
 
+    # ── live graph editing from the inspector ─────────────────────────────────
+    def graph_rename(self, old, new):
+        try:
+            n = graph.rename(old, new)
+            return {"ok": True, "moved": n, "name": graph._norm(new)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def graph_remove(self, name):
+        try:
+            return {"ok": True, "removed": graph.forget(name)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def graph_add(self, subject, relation, obj):
+        try:
+            ok = graph.add(subject, relation or "RELATED_TO", obj)
+            return {"ok": bool(ok)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def reindex(self):
         """Rebuild the document index + knowledge graph from the knowledge folder."""
         try:
@@ -434,4 +639,22 @@ def run(provider=None):
     )
     controller.attach(window)
     window.events.closed += controller.shutdown
+
+    # Make sure the window is actually visible & frontmost once it loads — guards
+    # against it being created hidden/minimised/behind at login.
+    def _bring_to_front():
+        try:
+            window.restore()
+        except Exception:
+            pass
+        try:
+            window.on_top = True
+            window.on_top = False
+        except Exception:
+            pass
+    try:
+        window.events.loaded += _bring_to_front
+    except Exception:
+        pass
+
     webview.start()

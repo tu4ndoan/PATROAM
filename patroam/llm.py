@@ -19,11 +19,20 @@ def available():
     return _COMPLETE is not None
 
 
-def complete(prompt, system=None):
-    """One-shot completion using the active model, or None if unavailable/failed."""
+def complete(prompt, system=None, timeout=None):
+    """One-shot completion using the active model, or None if unavailable/failed.
+    `timeout` (seconds) bounds the wait — important for latency-sensitive callers
+    like voice endpointing."""
     if _COMPLETE is None:
         return None
     try:
+        if timeout is not None:
+            return _COMPLETE(prompt, system, timeout)
         return _COMPLETE(prompt, system)
+    except TypeError:
+        try:
+            return _COMPLETE(prompt, system)
+        except Exception:
+            return None
     except Exception:
         return None

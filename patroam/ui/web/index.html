@@ -57,6 +57,43 @@
   .msg.you { align-self:flex-end; background:rgba(79,142,247,.18); border:1px solid rgba(79,142,247,.35); }
   .msg.bot { align-self:flex-start; background:rgba(123,92,255,.16); border:1px solid rgba(123,92,255,.3); }
   .msg .who { display:block; font-size:10px; opacity:.6; margin-bottom:2px; }
+  .msg a.lnk { color:#7fb0ff; text-decoration:underline; cursor:pointer; word-break:break-all; }
+  .msg a.lnk:hover { color:#a9c8ff; }
+  .msg a.filelnk { display:inline-block; cursor:pointer; color:#bfe3a0; text-decoration:none;
+    border:1px solid rgba(120,200,120,.35); border-radius:7px; padding:2px 8px; margin-top:3px; }
+  .msg a.filelnk:hover { border-color:#9fe080; box-shadow:0 0 8px rgba(120,200,120,.3); }
+  /* A/B choice widget (buttons PATROAM shows to confirm a decision) */
+  .askw { display:flex; flex-wrap:wrap; gap:8px; padding:4px 12px 10px; }
+  .askbtn { cursor:pointer; font-size:13px; padding:8px 14px; border-radius:10px;
+    border:1px solid rgba(123,92,255,.45); background:rgba(30,24,48,.85); color:#e8ecf7;
+    font-family:"Segoe UI", system-ui, sans-serif; transition:.15s; }
+  .askbtn:hover { border-color:var(--accent); box-shadow:0 0 12px rgba(123,92,255,.4);
+    background:rgba(50,40,80,.9); }
+  .msg img.att { max-width:220px; max-height:220px; border-radius:8px; margin-top:6px; display:block;
+    border:1px solid rgba(150,130,230,.35); }
+  /* code block + copy button */
+  .codeblk { position:relative; margin:6px 0; }
+  .codeblk pre { margin:0; background:#0c0f18; border:1px solid rgba(123,92,255,.25);
+    border-radius:8px; padding:10px 12px; overflow:auto; max-height:360px; }
+  .codeblk code { font-family:"Courier New", ui-monospace, monospace; font-size:12px;
+    color:#d6dcf0; white-space:pre; }
+  .codeblk .c-kw  { color:#c792ea; }            /* keywords  */
+  .codeblk .c-str { color:#c3e88d; }            /* strings   */
+  .codeblk .c-num { color:#f78c6c; }            /* numbers   */
+  .codeblk .c-cmt { color:#6b7a99; font-style:italic; }  /* comments */
+  .copybtn { position:absolute; top:6px; right:6px; cursor:pointer; font-size:10px; padding:3px 9px;
+    border-radius:6px; border:1px solid rgba(123,92,255,.4); background:rgba(20,16,34,.92);
+    color:#cdd2ff; font-family:"Segoe UI", system-ui, sans-serif; }
+  .copybtn:hover { border-color:var(--accent); box-shadow:0 0 8px rgba(123,92,255,.35); }
+  /* attached-image preview chip in the input bar */
+  .imgprev { display:none; align-items:center; gap:5px; }
+  .imgprev img { height:34px; border-radius:6px; border:1px solid rgba(150,130,230,.45); }
+  .imgprev .rm { cursor:pointer; color:#ff9aa2; font-size:13px; opacity:.85; }
+  .imgprev .rm:hover { opacity:1; }
+  /* full-window drop hint */
+  body.dragging::after { content:'⬇  Drop an image to ask PATROAM about it'; position:fixed; inset:0;
+    z-index:50; display:flex; align-items:center; justify-content:center; font-size:20px; color:#cdd2ff;
+    background:rgba(16,12,32,.6); border:3px dashed rgba(123,92,255,.7); pointer-events:none; }
   body.chat-open .bar { transform:translateX(calc(-50% - 175px)); transition:transform .25s ease; }
   @media (max-width:640px){ body.chat-open .bar { transform:translateX(-50%); } }
 
@@ -112,12 +149,26 @@
   .detail-rel { font-size:12px; line-height:1.7; color:#c7cce0; }
   .detail-rel .r { color:#7aa2ff; }
   .detail-rel b { color:#e8ecf7; }
+  .detail-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .dbtn { cursor:pointer; font-size:11px; padding:5px 9px; border-radius:7px; white-space:nowrap;
+    border:1px solid rgba(123,92,255,.35); background:rgba(30,24,48,.8); color:#dfe3ff;
+    font-family:"Segoe UI", system-ui, sans-serif; }
+  .dbtn:hover { border-color:var(--accent); box-shadow:0 0 10px rgba(123,92,255,.35); }
+  .dbtn.danger { border-color:rgba(239,68,68,.5); color:#ffb4b4; }
+  .dbtn.danger:hover { border-color:#ef4444; box-shadow:0 0 10px rgba(239,68,68,.4); }
+  .detail-form { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
+  .detail-form:empty { display:none; }
+  .dinp { font-size:12px; padding:6px 8px; min-width:120px; flex:1;
+    font-family:"Segoe UI", system-ui, sans-serif; }
   .meta { font-size:12px; color:var(--muted); }
   .meta b { color:#9aa8ff; }
   .chip { display:inline-block; font-size:11px; padding:2px 8px; margin:2px; border-radius:20px;
     border:1px solid rgba(123,92,255,.3); color:#bdb6ff; }
-  .kg-list { font-size:12px; line-height:1.7; color:#c7cce0; }
+  .kg-list { font-size:12px; line-height:1.7; color:#c7cce0;
+    font-family:"Segoe UI", system-ui, sans-serif; }
   .kg-list .rel { color:#7aa2ff; }
+  /* Vietnamese / accented text renders poorly in Courier — use a UI font here. */
+  .kg-detail, .kg-overlay, .detail-rel { font-family:"Segoe UI", system-ui, sans-serif; }
   .row { display:flex; gap:8px; }
   .row input { flex:1; }
   .hit { border:1px solid rgba(123,92,255,.18); border-radius:10px; padding:8px 10px;
@@ -181,7 +232,10 @@
       <button id="mic" class="btn" title="Hold to talk">🎙 Hold</button>
       <button id="wake" class="btn" title="Always-on wake word">😴 Always-on</button>
       <button id="tts" class="btn on" title="Speak replies">🔊</button>
-      <input id="text" placeholder="Type a command, Master…" />
+      <span id="attach" class="btn" title="Attach an image">📎</span>
+      <input id="file" type="file" accept="image/*" style="display:none" />
+      <div id="imgPreview" class="imgprev"></div>
+      <input id="text" placeholder="Type, or drop/paste an image…" />
       <button id="send" class="btn">→</button>
     </div>
   </div>
@@ -335,10 +389,58 @@ requestAnimationFrame(frame);
 // ── Chat panel ────────────────────────────────────────────────────────────────
 const logEl=document.getElementById('log');
 let curBot=null;
+function escHtml(s){ return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function linkifyText(s){ return s.replace(/(https?:\/\/[^\s<]+)/g, u=>'<a class="lnk" data-url="'+u+'">'+u+'</a>'); }
+// Browser-side clipboard fallback (used if the Python api isn't available).
+function jsCopy(t){ try{ const a=document.createElement('textarea'); a.value=t;
+  a.style.position='fixed'; a.style.opacity='0'; document.body.appendChild(a); a.select();
+  document.execCommand('copy'); document.body.removeChild(a); }catch(e){} }
+// Tiny offline syntax highlighter (comments / strings / numbers / keywords).
+const _HLTOKEN=/(#[^\n]*|\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(\b\d[\w.]*\b)|(\b(?:def|class|return|if|elif|else|for|while|do|switch|case|break|continue|import|from|as|in|is|not|and|or|lambda|try|except|catch|finally|with|yield|pass|global|raise|throw|void|int|float|double|char|long|short|unsigned|bool|auto|const|constexpr|static|struct|enum|public|private|protected|virtual|namespace|using|template|typename|new|delete|this|nullptr|sizeof|let|var|function|async|await|export|default|self|None|True|False|null|undefined|true|false|print|std|include|define)\b)/g;
+function highlight(code){
+  let out='', last=0, m; _HLTOKEN.lastIndex=0;
+  while((m=_HLTOKEN.exec(code))){
+    out+=escHtml(code.slice(last,m.index));
+    const cls=m[1]?'c-cmt':m[2]?'c-str':m[3]?'c-num':'c-kw';
+    out+='<span class="'+cls+'">'+escHtml(m[0])+'</span>';
+    last=m.index+m[0].length;
+  }
+  return out+escHtml(code.slice(last));
+}
+// Render a reply: fenced ```code``` becomes a code block with a Copy button;
+// everything else is escaped + URL-linkified.
+function renderRich(text){
+  const parts=(text||'').split('```'); let html='';
+  for(let i=0;i<parts.length;i++){
+    if(i%2===1){
+      let s=parts[i], nl=s.indexOf('\n');
+      if(nl>=0 && /^[\w+#.\-]{0,15}$/.test(s.slice(0,nl).trim())) s=s.slice(nl+1);  // drop lang label
+      html+='<div class="codeblk"><button class="copybtn" type="button">Copy</button><pre><code>'+highlight(s.replace(/\n$/,''))+'</code></pre></div>';
+    } else {
+      html+=linkifyText(escHtml(parts[i]));
+    }
+  }
+  return html;
+}
+function linkify(text){ return renderRich(text); }   // back-compat
 function addMsg(who,text,cls){ const d=document.createElement('div'); d.className='msg '+cls;
   const w=document.createElement('span'); w.className='who'; w.textContent=who; d.appendChild(w);
-  const t=document.createTextNode(text||''); d.appendChild(t); d._t=t;
+  const body=document.createElement('span'); body.className='body'; body.textContent=text||'';
+  d.appendChild(body); d._t=body;
   logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; return d; }
+// Clicking a link in the chat opens it in the real browser (not inside the orb).
+logEl.addEventListener('click', e=>{
+  const a=e.target.closest && e.target.closest('a.lnk');
+  if(a){ e.preventDefault(); const x=api(); if(x) x.open_url(a.dataset.url); return; }
+  const fl=e.target.closest && e.target.closest('a.filelnk');
+  if(fl){ e.preventDefault(); const x=api(); if(x&&x.open_path) x.open_path(fl.dataset.path); return; }
+  const b=e.target.closest && e.target.closest('.copybtn');
+  if(b){ const code=b.parentElement.querySelector('code'); const t=code?code.textContent:'';
+    const x=api();
+    if(x&&x.copy_clipboard){ x.copy_clipboard(t); }
+    else if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t).catch(()=>jsCopy(t)); }
+    else { jsCopy(t); }
+    b.textContent='Copied!'; setTimeout(()=>{ b.textContent='Copy'; }, 1200); } });
 function toggleChat(show){ const c=document.getElementById('chat');
   const open=show===undefined?c.classList.contains('hidden'):show;
   c.classList.toggle('hidden',!open); document.body.classList.toggle('chat-open',open); }
@@ -353,14 +455,59 @@ window.patroam = {
     (list&&list.length?list:['(no models)']).forEach(m=>{ const o=document.createElement('option'); o.value=o.textContent=m; sel.appendChild(o); }); },
   chatUser(text){ addMsg('You', text, 'you'); },
   chatToken(text){ if(!curBot) curBot=addMsg('PATROAM','','bot'); curBot._t.textContent+=text; logEl.scrollTop=logEl.scrollHeight; },
-  chatDone(text){ if(curBot){ if(text) curBot._t.textContent=text; } else { addMsg('PATROAM', text||'', 'bot'); } curBot=null; },
+  chatDone(text){ const d=curBot||addMsg('PATROAM','','bot'); if(text!=null) d._t.innerHTML=linkify(text); curBot=null; logEl.scrollTop=logEl.scrollHeight; },
+  chatFiles(paths){ if(!paths||!paths.length) return; const d=addMsg('PATROAM','','bot');
+    d._t.innerHTML='💾 Saved &mdash; click to open: '+paths.map(p=>{
+      const name=(''+p).replace(/\\/g,'/').split('/').pop();
+      return '<a class="filelnk" data-path="'+escAttr(p)+'">📄 '+escHtml(name)+'</a>'; }).join('&nbsp;&nbsp;');
+    logEl.scrollTop=logEl.scrollHeight; },
+  askWidget(question, options){ if(!options||!options.length) return;
+    const w=document.createElement('div'); w.className='askw';
+    options.forEach(o=>{ const b=document.createElement('button'); b.className='askbtn'; b.textContent=o;
+      b.onclick=()=>{ document.querySelectorAll('.askw').forEach(x=>x.remove());   // one answer
+        const a=api(); if(a) a.send(''+o); };
+      w.appendChild(b); });
+    logEl.appendChild(w); logEl.scrollTop=logEl.scrollHeight; },
 };
 
 // ── Bridge: page -> Python ────────────────────────────────────────────────────────
 const api=()=> (window.pywebview && window.pywebview.api) || null;
 const $=(id)=>document.getElementById(id);
-$('send').onclick=()=>{ const v=$('text').value.trim(); if(v&&api()){ api().send(v); $('text').value=''; } };
-$('text').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); $('send').onclick(); } });
+// ── image attach (drag-drop / paste / 📎) → ask PATROAM about it ───────────────
+let pendingImg=null;   // dataURL of the attached image, or null
+function renderImgPrev(){ const p=$('imgPreview');
+  if(!pendingImg){ p.style.display='none'; p.innerHTML=''; return; }
+  p.style.display='flex'; p.innerHTML='<img src="'+pendingImg+'"/><span class="rm" title="Remove">✕</span>';
+  p.querySelector('.rm').onclick=()=>{ pendingImg=null; renderImgPrev(); }; }
+function setImage(file){ if(!file || !file.type.startsWith('image/')) return;
+  const r=new FileReader(); r.onload=()=>{ pendingImg=r.result; renderImgPrev(); }; r.readAsDataURL(file); }
+function addImgMsg(who,text,dataURL,cls){ const d=addMsg(who,text||'',cls);
+  if(dataURL){ const im=document.createElement('img'); im.className='att'; im.src=dataURL; d.appendChild(im); }
+  logEl.scrollTop=logEl.scrollHeight; return d; }
+
+function doSend(){ const a=api(); if(!a) return; const v=$('text').value.trim();
+  if(pendingImg){
+    const b64=(pendingImg.split(',')[1])||'';
+    addImgMsg('You', v, pendingImg, 'you');     // show the image bubble ourselves
+    a.send_image(v, b64);
+    $('text').value=''; pendingImg=null; renderImgPrev();
+  } else if(v){ a.send(v); $('text').value=''; } }
+$('send').onclick=doSend;
+$('text').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doSend(); } });
+
+// 📎 file picker
+$('attach').onclick=()=>$('file').click();
+$('file').addEventListener('change', e=>{ if(e.target.files[0]) setImage(e.target.files[0]); e.target.value=''; });
+// paste an image from the clipboard
+addEventListener('paste', e=>{ const items=(e.clipboardData||{}).items||[];
+  for(const it of items){ if(it.type && it.type.startsWith('image/')){ setImage(it.getAsFile()); break; } } });
+// drag & drop anywhere in the window
+['dragenter','dragover'].forEach(ev=>addEventListener(ev, e=>{
+  if(e.dataTransfer && Array.from(e.dataTransfer.types||[]).includes('Files')){ e.preventDefault(); document.body.classList.add('dragging'); } }));
+['dragleave','dragend'].forEach(ev=>addEventListener(ev, e=>{ if(e.relatedTarget===null) document.body.classList.remove('dragging'); }));
+addEventListener('drop', e=>{ document.body.classList.remove('dragging');
+  const f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if(f && f.type.startsWith('image/')){ e.preventDefault(); setImage(f); } });
 $('model').onchange=()=>{ api()&&api().set_model($('model').value); };
 $('refresh').onclick=async()=>{ if(api()){ const m=await api().get_models(); window.patroam.setModels(m); } };
 let ttsOn=true;
@@ -413,17 +560,34 @@ addEventListener('keydown',e=>{ if(e.key==='Escape') setFull(false); });
 
 // ── 3D knowledge graph (Canvas2D projection — rotate / drag / zoom / click) ─────
 const G={ nodes:[], edges:[], byId:{}, run:false, raf:0, t:0, hot:0, sel:null,
-  rotX:-0.18, rotY:0.5, zoom:1.1, spin:true };
-const PROJ_D=3.6;
+  rotX:-0.18, rotY:0.5, zoom:1.05, spin:true, anchors:{} };
+const PROJ_D=3.6, GRAPH_R=1.4;   // GRAPH_R = sphere shell radius
+const PALETTE=[[124,158,255],[180,120,255],[80,200,255],[120,230,170],
+  [255,150,200],[255,200,110],[150,255,230],[255,130,130],[200,160,255],[255,170,90]];
+function isUserId(id){ return (id||'').toLowerCase()==='you'; }
 
 function build3D(triples){
   const prev={}; G.nodes.forEach(n=>prev[n.id]={x:n.x,y:n.y,z:n.z,vx:n.vx,vy:n.vy,vz:n.vz});
+  // Group each node by its source document (personal facts → "You memory").
+  const nodeGroup={};
+  triples.forEach(t=>{ const g=t.doc || ((isUserId(t.s)||isUserId(t.o))?'You memory':'General');
+    for(const id of [t.s,t.o]){
+      if(nodeGroup[id]===undefined) nodeGroup[id]=g;
+      else if(nodeGroup[id]==='General' && g!=='General') nodeGroup[id]=g; } });
+  const groups=[...new Set(Object.values(nodeGroup))];
+  // Anchor each document to a point on the sphere (golden-spiral spread) + colour.
+  const GA=Math.PI*(3-Math.sqrt(5)); G.anchors={}; const gcol={};
+  groups.forEach((g,i)=>{ const yy=groups.length>1?1-(i+0.5)/groups.length*2:0;
+    const rad=Math.sqrt(Math.max(0,1-yy*yy)), th=i*GA;
+    G.anchors[g]=[Math.cos(th)*rad, yy, Math.sin(th)*rad];
+    gcol[g]=PALETTE[i%PALETTE.length]; });
   const idx={}, N=[];
   const names=[...new Set(triples.flatMap(t=>[t.s,t.o]))];
   names.forEach((n,i)=>{ const p=prev[n]; idx[n]=i;
-    const u=Math.random()*6.283, v=Math.acos(2*Math.random()-1), rr=0.5+Math.random()*0.4;
-    N.push({ id:n, deg:0, ph:Math.random()*6.28, born:p?1:0,
-      x:p?p.x:rr*Math.sin(v)*Math.cos(u), y:p?p.y:rr*Math.cos(v), z:p?p.z:rr*Math.sin(v)*Math.sin(u),
+    const grp=nodeGroup[n]||'General', a=G.anchors[grp]||[0,0,0];
+    const j=()=>(Math.random()-0.5)*0.5;
+    N.push({ id:n, group:grp, color:gcol[grp]||PALETTE[0], deg:0, ph:Math.random()*6.28, born:p?1:0,
+      x:p?p.x:a[0]*GRAPH_R+j(), y:p?p.y:a[1]*GRAPH_R+j(), z:p?p.z:a[2]*GRAPH_R+j(),
       vx:p?p.vx:0, vy:p?p.vy:0, vz:p?p.vz:0, sx:null, sy:null, r:3, depth:0 }); });
   const E=triples.filter(t=>idx[t.s]!=null&&idx[t.o]!=null)
     .map(t=>({ a:idx[t.s], b:idx[t.o], rel:t.r.replace(/_/g,' ').toLowerCase(), p:Math.random() }));
@@ -433,23 +597,32 @@ function build3D(triples){
 }
 
 function step3D(){
-  const N=G.nodes, E=G.edges;
+  const N=G.nodes, E=G.edges, R=GRAPH_R;
   for(let i=0;i<N.length;i++){ const a=N[i];
+    // repulsion — gentle, short-range, so it spreads neighbours without flinging
+    // connected nodes to the far side of the sphere.
     for(let j=i+1;j<N.length;j++){ const b=N[j];
-      let dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z, d2=dx*dx+dy*dy+dz*dz||0.001, d=Math.sqrt(d2);
-      const rep=0.3/d2, fx=dx/d*rep, fy=dy/d*rep, fz=dz/d*rep;
+      let dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z, d2=dx*dx+dy*dy+dz*dz||0.001;
+      if(d2>1.2) continue;                       // only nearby nodes repel
+      const d=Math.sqrt(d2), rep=0.045/d2, fx=dx/d*rep, fy=dy/d*rep, fz=dz/d*rep;
       a.vx+=fx;a.vy+=fy;a.vz+=fz; b.vx-=fx;b.vy-=fy;b.vz-=fz; }
-    a.vx+=-a.x*0.02; a.vy+=-a.y*0.02; a.vz+=-a.z*0.02; }
-  const L=0.72;
+    // gentle document-cluster bias toward the doc anchor
+    const an=G.anchors[a.group]||[0,0,0];
+    a.vx+=(an[0]*R-a.x)*0.006; a.vy+=(an[1]*R-a.y)*0.006; a.vz+=(an[2]*R-a.z)*0.006;
+    // spherize: ease onto the sphere shell (radius R) → rounded, like the orb
+    const rad=Math.hypot(a.x,a.y,a.z)||0.001, k=(R-rad)/rad*0.03;
+    a.vx+=a.x*k; a.vy+=a.y*k; a.vz+=a.z*k; }
+  // springs (the dominant force): connected nodes pull CLOSE together
+  const L=0.32;
   for(const e of E){ const a=N[e.a], b=N[e.b];
-    let dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,d=Math.hypot(dx,dy,dz)||0.001,f=(d-L)*0.04;
+    let dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,d=Math.hypot(dx,dy,dz)||0.001,f=(d-L)*0.09;
     const fx=dx/d*f,fy=dy/d*f,fz=dz/d*f;
     a.vx+=fx;a.vy+=fy;a.vz+=fz; b.vx-=fx;b.vy-=fy;b.vz-=fz; }
-  const cap=G.hot>0.02?0.06:0.018;
+  const cap=G.hot>0.02?0.06:0.02;
   for(const a of N){ a.vx*=0.85;a.vy*=0.85;a.vz*=0.85;
     a.x+=Math.max(-cap,Math.min(cap,a.vx)); a.y+=Math.max(-cap,Math.min(cap,a.vy)); a.z+=Math.max(-cap,Math.min(cap,a.vz));
-    // Keep nodes inside a safe sphere so projection can never blow up.
-    a.x=Math.max(-2,Math.min(2,a.x)); a.y=Math.max(-2,Math.min(2,a.y)); a.z=Math.max(-2,Math.min(2,a.z));
+    // radial (sphere) clamp — NOT a per-axis box, so it never looks cubic
+    const rad=Math.hypot(a.x,a.y,a.z); if(rad>R*1.7){ const s=R*1.7/rad; a.x*=s;a.y*=s;a.z*=s; }
     if(a.born<1) a.born=Math.min(1,a.born+0.04); }
   G.hot*=0.97;
 }
@@ -495,14 +668,14 @@ function render3D(){
     if(on){ e.p=(e.p+0.005)%1; const px=a.sx+(b.sx-a.sx)*e.p, py=a.sy+(b.sy-a.sy)*e.p;
       x.fillStyle='rgba(190,215,255,.95)'; x.beginPath(); x.arc(px,py,full?2.4:1.8,0,6.2832); x.fill(); }
     if((full||G.sel) && on){ x.globalCompositeOperation='source-over';
-      x.fillStyle='rgba(160,176,255,.75)'; x.font='10px monospace'; x.textAlign='center';
+      x.fillStyle='rgba(160,176,255,.75)'; x.font='10px "Segoe UI", sans-serif'; x.textAlign='center';
       x.fillText(e.rel,(a.sx+b.sx)/2,(a.sy+b.sy)/2-3); x.globalCompositeOperation='lighter'; } }
   // Nodes, drawn back-to-front. Haloes first (additive), then crisp cores.
   const order=[...G.nodes].sort((p,q)=>p.depth-q.depth);
   for(const n of order){ const dim=G.sel && !neigh.has(n.id);
     const pulse=0.6+0.4*Math.sin(G.t*0.05+n.ph);
     const a=(dim?0.1:0.85)*pulse*n.born;
-    const col=(n.id===G.sel)?'255,150,90':'150,120,255';
+    const col=(n.id===G.sel)?'255,150,90':(n.color?n.color.join(','):'150,120,255');
     const halo=x.createRadialGradient(n.sx,n.sy,0,n.sx,n.sy,n.r*3.4);
     halo.addColorStop(0,'rgba('+col+','+a+')'); halo.addColorStop(1,'rgba('+col+',0)');
     x.fillStyle=halo; x.beginPath(); x.arc(n.sx,n.sy,n.r*3.4,0,6.2832); x.fill(); }
@@ -512,7 +685,7 @@ function render3D(){
     x.fillStyle=(n.id===G.sel)?'rgba(255,214,176,'+n.born+')':'rgba(232,236,255,'+(dim?0.22:1)*n.born+')';
     x.beginPath(); x.arc(n.sx,n.sy,rr,0,6.2832); x.fill();
     const showLab=(full || !G.sel || neigh.has(n.id)) && !dim;
-    if(showLab){ x.fillStyle='rgba(223,227,255,'+n.born+')'; x.font=(full?'12px':'10px')+' monospace'; x.textAlign='center';
+    if(showLab){ x.fillStyle='rgba(223,227,255,'+n.born+')'; x.font=(full?'12px':'10px')+' "Segoe UI", sans-serif'; x.textAlign='center';
       const lab=n.id.length>(full?30:16)?n.id.slice(0,(full?29:15))+'…':n.id;
       x.fillText(lab, n.sx, n.sy-rr-5); } }
 }
@@ -563,6 +736,18 @@ window.patroam.focusFromText=function(text){
   if(!$('pane-kg').classList.contains('sel')){ const tb=document.querySelector('.tab[data-tab="kg"]'); if(tb) tb.click(); }
   selectNode(n.id);
 };
+// Called when you ASK what PATROAM knows — open the graph fullscreen + focus it.
+window.patroam.exploreFromText=async function(text){
+  insp.classList.add('open');
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('sel'));
+  document.querySelectorAll('.pane').forEach(x=>x.classList.remove('sel'));
+  const tb=document.querySelector('.tab[data-tab="kg"]'); if(tb) tb.classList.add('sel');
+  $('pane-kg').classList.add('sel');
+  await loadGraph();
+  setFull(true);
+  const n=findNode(text); if(n) selectNode(n.id);
+  loadRag();
+};
 // Search bar: focus a node as you type / on Enter.
 $('kgSearch').addEventListener('input', e=>{ const v=e.target.value.trim();
   if(!v){ clearSel(); return; } const n=findNode(v); if(n) selectNode(n.id); });
@@ -582,9 +767,41 @@ function renderDetail(){
   out.forEach(c=> html+='<b>'+esc(G.sel)+'</b> <span class="r">'+esc(c.rel)+'</span> '+esc(c.other)+'<br>');
   inc.forEach(c=> html+=esc(c.other)+' <span class="r">'+esc(c.rel)+'</span> <b>'+esc(G.sel)+'</b><br>');
   if(!deg) html+='No connections recorded yet.';
-  html+='</div>';
+  html+='</div>'+
+    '<div class="detail-actions">'+
+    '<span class="dbtn" data-act="rename">✎ Rename</span>'+
+    '<span class="dbtn" data-act="addlink">＋ Link</span>'+
+    '<span class="dbtn danger" data-act="delete">🗑 Delete</span></div>'+
+    '<div class="detail-form"></div>';
   dEl.innerHTML=html; oEl.innerHTML=html; oEl.classList.add('show');
-  [dEl,oEl].forEach(el=>{ const c=el.querySelector('.detail-clear'); if(c) c.onclick=clearSel; });
+  wireDetail(dEl); wireDetail(oEl);
+}
+
+function escAttr(s){ return esc(s).replace(/"/g,'&quot;'); }
+
+// Wire the edit buttons (rename / add link / delete) inside a detail container.
+function wireDetail(el){
+  const clr=el.querySelector('.detail-clear'); if(clr) clr.onclick=clearSel;
+  const form=el.querySelector('.detail-form');
+  const showForm=(inner, onsave)=>{ if(!form) return; form.innerHTML=inner;
+    const s=form.querySelector('.dsave'); if(s) s.onclick=onsave;
+    const i=form.querySelector('input'); if(i){ i.focus();
+      i.addEventListener('keydown',ev=>{ if(ev.key==='Enter'&&s) s.onclick(); ev.stopPropagation(); }); } };
+  const btn=(a,fn)=>{ const b=el.querySelector('.dbtn[data-act="'+a+'"]'); if(b) b.onclick=fn; };
+  btn('rename', ()=> showForm(
+    '<input class="glass dinp" value="'+escAttr(G.sel)+'"/><span class="dbtn dsave">Save</span>',
+    async ()=>{ const v=form.querySelector('input').value.trim(); if(!v||!api())return;
+      const r=await api().graph_rename(G.sel, v); await loadGraph();
+      if(r&&r.ok){ G.sel=r.name||v; selectNode(G.sel); } }));
+  btn('addlink', ()=> showForm(
+    '<input class="glass dinp" placeholder="relation (e.g. uses)"/>'+
+    '<input class="glass dinp" placeholder="other node"/><span class="dbtn dsave">Add</span>',
+    async ()=>{ const ins=form.querySelectorAll('input'); const rel=ins[0].value.trim(), tgt=ins[1].value.trim();
+      if(!tgt||!api())return; await api().graph_add(G.sel, rel||'related to', tgt);
+      await loadGraph(); selectNode(G.sel); }));
+  btn('delete', ()=> showForm(
+    '<span style="font-size:12px">Delete <b>'+esc(G.sel)+'</b> and its links?</span> <span class="dbtn danger dsave">Yes, delete</span>',
+    async ()=>{ if(!api())return; const id=G.sel; await api().graph_remove(id); clearSel(); await loadGraph(); }));
 }
 
 async function loadGraph(){ if(!api())return;

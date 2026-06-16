@@ -44,12 +44,23 @@ class AnthropicProvider(Provider):
     @staticmethod
     def _split(messages):
         """Claude takes the system prompt as a separate argument, not as a
-        message. Pull any system messages out and keep the rest in order."""
+        message. Pull system messages out; convert any attached images (the
+        Ollama-style `images` key of base64 PNGs) into Claude image content
+        blocks so Claude can see them."""
         system_parts, msgs = [], []
         for m in messages:
             if m.get("role") == "system":
                 if m.get("content"):
                     system_parts.append(m["content"])
+                continue
+            imgs = m.get("images")
+            if imgs:
+                content = [{"type": "image",
+                            "source": {"type": "base64", "media_type": "image/png", "data": b}}
+                           for b in imgs]
+                if m.get("content"):
+                    content.append({"type": "text", "text": m["content"]})
+                msgs.append({"role": m["role"], "content": content})
             else:
                 msgs.append({"role": m["role"], "content": m["content"]})
         return "\n\n".join(system_parts), msgs

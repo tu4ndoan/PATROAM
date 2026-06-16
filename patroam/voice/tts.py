@@ -90,8 +90,10 @@ class EdgeTTSEngine:
         import edge_tts
 
         async def run():
+            # Read the voice fresh each time so switching language at runtime
+            # (e.g. "reply in Vietnamese") takes effect immediately.
             comm = edge_tts.Communicate(
-                text, self.voice,
+                text, config.TTS_VOICE_EDGE or self.voice,
                 rate=config.TTS_RATE, volume=config.TTS_VOLUME, pitch=config.TTS_PITCH,
             )
             await comm.save(self.tmp)

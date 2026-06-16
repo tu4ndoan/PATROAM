@@ -48,6 +48,13 @@ ADS_CTX_RE = re.compile(r"\b(doing|stats|statistics|performance|results?|spend|s
 # News command ("what's up", "what's new", "news", "headlines", …).
 NEWS_RE = re.compile(r"\b(what'?s up|what'?s new|what is up|news|headlines|catch me up)\b", re.I)
 
+# Switch reply language ("reply in Vietnamese", "trả lời bằng tiếng Việt", …).
+LANG_RE = re.compile(
+    r"\b(reply|respond|speak|talk|answer|switch|change|use)\b.{0,24}"
+    r"(vietnamese|tieng viet|tiếng việt|vietnam|english|tieng anh|tiếng anh)\b"
+    r"|\b(trả lời|nói|chuyển|dùng)\b.{0,24}(tiếng việt|tieng viet|tiếng anh|tieng anh)", re.I)
+_VIET_RE = re.compile(r"viet|việt", re.I)
+
 # Re-index the knowledge base ("index my docs", "reload knowledge", …).
 INGEST_RE = re.compile(r"\b(index|re-?index|ingest|reload|refresh|rebuild|update)\b"
                        r".{0,20}\b(docs?|documents?|knowledge|files?|notes?|memory base)\b", re.I)
@@ -57,6 +64,22 @@ GRAPH_RE = re.compile(r"\b(knowledge graph|what'?s connected|show.{0,15}(connect
 
 # Explicit "connect/link A to B" → a RELATED_TO edge.
 CONNECT_RE = re.compile(r"^\s*(?:connect|link)\s+(.+?)\s+(?:to|with|and)\s+(.+)$", re.I)
+
+# "merge A into B" / "merge A and B" / "A is the same as B" — fold duplicate nodes.
+MERGE_RE = re.compile(
+    r"^\s*merge\s+(.+?)\s+(?:into|with|and|to)\s+(.+)$", re.I)
+SAME_RE = re.compile(
+    r"^\s*(.+?)\s+(?:is|are)\s+the same(?:\s+(?:as|node|thing|entity|person))?\s+(?:as\s+)?(.+)$", re.I)
+# "merge duplicates", "clean up the graph", "deduplicate the graph" — auto-merge.
+DEDUPE_RE = re.compile(
+    r"\b(merge|combine|clean ?up|de-?duplicate|de-?dupe|fix)\b.{0,24}"
+    r"\b(duplicates?|dupes?|nodes?|graph|entities)\b", re.I)
+# "clear/reset/wipe the knowledge graph" — start the graph fresh.
+CLEAR_GRAPH_RE = re.compile(
+    r"\b(clear|reset|wipe|empty|erase|delete)\b.{0,24}\b(knowledge graph|graph)\b", re.I)
+# Modifiers that mean "remove my personal memory too".
+CLEAR_ALL_RE = re.compile(
+    r"\b(everything|including (my )?memory|memory too|personal|all of it|completely)\b", re.I)
 
 # Relationship verbs → canonical relation. Order matters (most specific first);
 # the generic "is/are" attribute pattern is LAST so it never shadows the others.
@@ -343,15 +366,156 @@ def is_stop_speaking(text):
     return bool(STOP_SPEAKING_RE.match(text or ""))
 
 
-def try_handle(text):
-    """Handle `text` as a system command.
+def split_reply(reply):
+    """Normalise a skill reply into (spoken_text, shown_text).
 
-    Returns: a spoken reply string, "" if handled but nothing should be spoken
-    (e.g. "stop"), or None if not a command (fall through to the model).
+    A skill may return a plain string (spoken == shown) or a dict
+    {"say": ..., "show": ...} when the chat should show MORE than is spoken
+    (e.g. news: speak titles, show clickable links)."""
+    if isinstance(reply, dict):
+        say = reply.get("say", "") or reply.get("show", "")
+        show = reply.get("show", "") or say
+        return say, show
+    return reply, reply
+
+
+# Questions that ask PATROAM what it knows → open the graph fullscreen.
+INFO_QUERY_RE = re.compile(
+    r"\b(what do you know about|tell me about|what (?:is|are|was|were)|what'?s|"
+    r"who (?:is|are|was)|who'?s|explain|describe|info(?:rmation)? (?:on|about)|"
+    r"do you know (?:about|anything about)|what can you tell me about|"
+    r"show me .*\bgraph|knowledge graph)\b", re.I)
+
+
+def is_info_query(text):
+    """True if the user is asking PATROAM what it knows (a good moment to open
+    the knowledge graph fullscreen and focus the relevant node)."""
+    return bool(INFO_QUERY_RE.search(text or ""))
+
+
+# Asking PATROAM to look at the screen → capture a screenshot for the vision model.
+SCREEN_RE = re.compile(
+    r"\b(look at|see|read|check|describe|analy[sz]e|capture|what'?s on|whats on|"
+    r"what do you see|can you see|take a look)\b.{0,18}\b(screen|display|monitor|this|here)\b"
+    r"|\bscreenshot\b|\bmy screen\b", re.I)
+
+
+def wants_screen(text):
+    """True if the user wants PATROAM to look at their screen."""
+    return bool(SCREEN_RE.search(text or ""))
+
+
+# Asking PATROAM to produce a file → save the code block(s) from the reply.
+CREATE_FILE_RE = re.compile(
+    r"\b(write|create|make|generate|build|draft|code|save)\b[^.?!]{0,50}?"
+    r"\b(script|program|file|module|app|class|function|snippet|code)\b"
+    r"|\bsave\b[^.?!]{0,25}\b(it|this|that|code|to\s+(?:a\s+)?file)\b"
+    r"|\b[\w\-]{1,40}\.(?:py|cpp|cc|cxx|c|hpp|h|js|ts|java|go|rs|swift|kt|html|css|json|ya?ml|sh|sql|txt)\b",
+    re.I)
+
+
+def wants_file(text):
+    """True if the user is asking PATROAM to generate/save a file."""
+    return bool(CREATE_FILE_RE.search(text or ""))
+
+
+# Coding questions → PATROAM switches to its coding model.
+CODE_QUERY_RE = re.compile(
+    r"\b(cod(?:e|ing)|programming|script|function|method|algorithm|debug|refactor|"
+    r"compile|syntax|stack ?trace|traceback|regex|unit ?test|leetcode|recursion)\b"
+    r"|\b(python|c\+\+|cpp|c#|csharp|javascript|typescript|java|kotlin|swift|rust|"
+    r"golang|sql|html|css|bash|powershell|node\.?js)\b"
+    r"|\b(write|create|make|generate|fix|implement|optimi[sz]e|review|explain|build)\b"
+    r"[^.?!]{0,30}\b(code|program|script|function|app|class|api|bug|error)\b", re.I)
+
+
+def is_coding_query(text):
+    """True if the user is asking a coding/programming question."""
+    return bool(CODE_QUERY_RE.search(text or "") or wants_file(text))
+
+
+# Detect a two-way choice in a reply ("do you want A or B?") → render as buttons,
+# even if the model asked in prose instead of emitting an ask action.
+_CHOICE_RE = re.compile(
+    r"\b(?:want|prefer|like|use|choose|pick|go with|which)\b[^?\n]*?\b"
+    r"([A-Za-z][\w.+#/-]{0,28})\s*,?\s+or\s+,?\s*([A-Za-z][\w.+#/-]{0,28})[^?\n]*\?",
+    re.I)
+
+
+_PTYPES = [
+    (re.compile(r"\b(flutter|dart)\b", re.I), "flutter"),
+    (re.compile(r"\b(web ?app|web application|react|vue|svelte|spa)\b", re.I), "webapp"),
+    (re.compile(r"\b(website|web ?site|landing page|static site|web page)\b", re.I), "website"),
+    (re.compile(r"\b(desktop|tkinter|pyqt|electron)\b", re.I), "desktop"),
+    (re.compile(r"\bpython\b", re.I), "python"),
+]
+# A go-ahead to actually build it.
+GO_RE = re.compile(
+    r"\b(create|build|scaffold|make|generate|start|go ahead|do it|let'?s go|"
+    r"here we go|where'?s? (?:the|my) project|set ?up)\b", re.I)
+
+
+def project_type(text):
+    """Detect a project type mentioned in the text (flutter/python/website/…)."""
+    for rx, t in _PTYPES:
+        if rx.search(text or ""):
+            return t
+    return None
+
+
+def extract_choices(reply):
+    """Return [optionA, optionB] if the reply offers a clear two-way choice, else None."""
+    m = _CHOICE_RE.search(reply or "")
+    if not m:
+        return None
+    a, b = m.group(1).strip(" .,"), m.group(2).strip(" .,")
+    if a and b and a.lower() != b.lower():
+        return [a, b]
+    return None
+
+
+def try_handle(text):
+    """Deterministic handling: data fetch first, then a system command.
+    Returns a reply string/dict, "" if handled silently, or None to fall through
+    to the model. (Kept for the daemon / web / Tk frontends.)"""
+    r = data_handle(text)
+    return r if r is not None else command_handle(text)
+
+
+def data_handle(text):
+    """Things that FETCH live data — run before the model (it can't be trusted to
+    actually fetch, and we don't want it talking over the result). News, ads."""
+    # Ad stats (direct Meta API — reliable on any model).
+    if ADS_RE.search(text) and ADS_CTX_RE.search(text):
+        from . import meta_ads
+        return meta_ads.summary(text)
+    # Latest news from your trusted feeds (speaks titles, shows clickable links).
+    if NEWS_RE.search(text):
+        from . import news
+        return news.latest(text)
+    return None
+
+
+def command_handle(text):
+    """System commands & graph/memory edits. In the LLM-first flow these run as a
+    FALLBACK when the model understood but didn't emit the matching tool call —
+    so on a weak model the command still happens.
+
+    Returns a spoken reply string, "" if handled silently, or None if not a
+    command.
     """
     # "Stop" — handled silently; the caller has already interrupted any speech.
     if STOP_SPEAKING_RE.match(text):
         return ""
+
+    # Switch reply language on the fly (affects the model's text and the voice).
+    if LANG_RE.search(text):
+        from . import config
+        if _VIET_RE.search(text):
+            config.set_language("Vietnamese")
+            return "Vâng, từ bây giờ tôi sẽ trả lời bằng tiếng Việt."
+        config.set_language("English")
+        return "Of course — I'll reply in English from now on."
 
     # "connect A to B" → a knowledge-graph edge.
     m = CONNECT_RE.match(text)
@@ -396,6 +560,39 @@ def try_handle(text):
         from . import graph
         return graph.user_summary()
 
+    # Clear/reset the knowledge graph ("clear the knowledge graph"). Keeps your
+    # personal memory unless you say "everything / including memory".
+    if CLEAR_GRAPH_RE.search(text):
+        from . import graph
+        keep = not CLEAR_ALL_RE.search(text)
+        removed = graph.clear(keep_user=keep)
+        if not removed:
+            return f"The knowledge graph is already empty{_addr()}."
+        scope = "your personal memory is kept" if keep else "personal memory included"
+        return (f"Cleared {removed} fact{'s' if removed != 1 else ''} from your "
+                f"knowledge graph{_addr()} — {scope}.")
+
+    # Auto-merge all duplicate nodes ("merge duplicates", "clean up the graph").
+    if DEDUPE_RE.search(text):
+        from . import graph
+        merges = graph.merge_duplicates()
+        if not merges:
+            return f"No duplicate nodes to merge{_addr()} — your graph looks clean."
+        n = sum(len(m[1]) for m in merges)
+        examples = "; ".join(f"{kept}" for kept, _ in merges[:4])
+        return (f"Merged {n} duplicate node{'s' if n != 1 else ''} into "
+                f"{len(merges)} entit{'ies' if len(merges) != 1 else 'y'}{_addr()}: {examples}.")
+
+    # Merge two specific nodes ("merge A into B", "A is the same as B").
+    m = MERGE_RE.match(text) or SAME_RE.match(text)
+    if m:
+        from . import graph
+        a, b = m.group(1).strip().rstrip(".!?"), m.group(2).strip().rstrip(".!?")
+        moved = graph.merge(a, b)
+        if moved:
+            return f"Merged {a} into {b}{_addr()} — moved {moved} connection{'s' if moved != 1 else ''}."
+        return f"I couldn't find connections for {a} to merge{_addr()}."
+
     # Knowledge-graph overview.
     if GRAPH_RE.search(text):
         from . import graph
@@ -411,16 +608,6 @@ def try_handle(text):
         facts = f", and built {tr} fact{'s' if tr != 1 else ''} into your knowledge graph" if tr else ""
         return (f"Indexed {n} passage{'s' if n != 1 else ''} from "
                 f"{m} document{'s' if m != 1 else ''}{facts}{_addr()}.")
-
-    # Ad stats (direct Meta API — reliable on any model).
-    if ADS_RE.search(text) and ADS_CTX_RE.search(text):
-        from . import meta_ads
-        return meta_ads.summary(text)
-
-    # Latest news (NewsAPI).
-    if NEWS_RE.search(text):
-        from . import news
-        return news.headlines(text)
 
     if MUSIC_RE.search(text):
         play_music()

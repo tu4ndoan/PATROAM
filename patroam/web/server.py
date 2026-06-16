@@ -131,7 +131,8 @@ def create_app(local_voice=False):
                     reply = skills.try_handle(text)
                     if reply is not None:
                         if reply:
-                            await ws.send_json({"type": "reply", "text": reply})
+                            say, show = skills.split_reply(reply)
+                            await ws.send_json({"type": "reply", "text": show, "say": say})
                         else:
                             await cancel_current()
                             await ws.send_json({"type": "stop"})

@@ -193,8 +193,9 @@ class PatroamChat(tk.Tk):
         handled = skills.try_handle(text)
         if handled is not None:
             if handled:
-                self._set_status(handled)
-                self._speak(handled)
+                say, _show = skills.split_reply(handled)
+                self._set_status(say)
+                self._speak(say)
             else:
                 self._stop_now()
             return
