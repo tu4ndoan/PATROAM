@@ -12,6 +12,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8754", "--directory", "patroam/web/static"],
       "port": 8754
+    },
+    {
+      "name": "tu4ndoan",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "../tu4ndoan", "run", "dev"],
+      "port": 3000
     }
   ]
 }

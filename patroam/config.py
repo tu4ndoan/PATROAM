@@ -35,7 +35,7 @@ OLLAMA_URL = os.environ.get("PATROAM_OLLAMA_URL", "http://localhost:11434")
 # Preferred model to start on. Matched flexibly against the available models
 # (exact, case-insensitive, then substring), so "llama3" picks "Llama3:latest".
 # Override with PATROAM_MODEL (e.g. "claude-opus-4-8"; Claude needs ANTHROPIC_API_KEY).
-DEFAULT_MODEL = os.environ.get("PATROAM_MODEL", "llama3")
+DEFAULT_MODEL = os.environ.get("PATROAM_MODEL", "gemma4.31b-cloud")
 
 # Preferred CLOUD vision model (Claude reads images very well). Used when an
 # ANTHROPIC_API_KEY is configured; otherwise PATROAM falls back to a local
@@ -113,6 +113,62 @@ def _load_news():
 
 
 NEWS_FEEDS, NEWS_INTERESTS = _load_news()
+
+# ── Automatic news watch (poll feeds, alert on anything new) ──────────────────────
+# PATROAM checks your feeds every NEWS_WATCH_INTERVAL seconds and proactively
+# reports new items (spoken by the orb and/or DM'd to your phone via Slack).
+NEWS_WATCH = os.environ.get("PATROAM_NEWS_WATCH", "1") not in ("0", "false", "False", "")
+NEWS_WATCH_INTERVAL = int(os.environ.get("PATROAM_NEWS_WATCH_INTERVAL", "300"))   # 5 min
+NEWS_WATCH_MAX = int(os.environ.get("PATROAM_NEWS_WATCH_MAX", "5"))
+# Only alert on items matching your interests (avoids spam). 0 = any new item.
+NEWS_WATCH_INTERESTS_ONLY = os.environ.get(
+    "PATROAM_NEWS_WATCH_INTERESTS_ONLY", "1") not in ("0", "false", "False", "")
+NEWS_SEEN_FILE = os.path.join(os.path.expanduser("~"), ".patroam", "news_seen.json")
+
+# ── Slack (chat with PATROAM from your phone) ─────────────────────────────────────
+# Socket Mode: PATROAM connects OUT to Slack, so it runs on your computer with no
+# public URL/port-forwarding. Put the tokens in ~/.patroam/secrets.json. See
+# patroam/slack_bot.py for the one-time Slack-app setup.
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")      # xoxb-…
+SLACK_APP_TOKEN = os.environ.get("SLACK_APP_TOKEN", "")      # xapp-…
+# Optional: where to post PROACTIVE alerts (news). A channel id the bot is in, or
+# your DM channel id. Replies to your messages go back automatically regardless.
+SLACK_DM_CHANNEL = os.environ.get("SLACK_DM_CHANNEL", "")
+
+
+def slack_enabled():
+    return bool(SLACK_BOT_TOKEN and SLACK_APP_TOKEN)
+
+
+# ── Media extracted from documents (images inside PDFs etc.) ──────────────────────
+MEDIA_DIR = os.environ.get(
+    "PATROAM_MEDIA_DIR", os.path.join(os.path.expanduser("~"), ".patroam", "media"))
+MEDIA_INDEX_FILE = os.path.join(MEDIA_DIR, "index.json")
+
+# ── Gold price + Fab sales ──────────────────────────────────────────────────────
+# Optional goldapi.io key (in secrets) for the gold price; without one, a free
+# keyless source is used. "what's up", "gold price", or "fab sales" use these.
+GOLD_API_KEY = os.environ.get("GOLD_API_KEY", "")
+FAB_SALES_URL = os.environ.get("PATROAM_FAB_URL",
+                               "https://www.fab.com/portal/analytics/reports/sales")
+# Download endpoint — opened in Brave (your logged-in session) to fetch a fresh
+# CSV, which PATROAM then reads. FAB_REPORT_DAYS sets the date range.
+FAB_DOWNLOAD_URL = os.environ.get("PATROAM_FAB_DOWNLOAD_URL",
+                                  "https://www.fab.com/i/portal/sales/reports/download")
+FAB_REPORT_DAYS = int(os.environ.get("PATROAM_FAB_REPORT_DAYS", "365"))
+
+# ── ClickUp (Planner agent pushes project roadmaps here) ──────────────────────────
+# Personal API token (ClickUp → Settings → Apps) + the Space id (from its URL).
+CLICKUP_API_TOKEN = os.environ.get("CLICKUP_API_TOKEN", "")
+CLICKUP_SPACE_ID = os.environ.get("CLICKUP_SPACE_ID", "")
+
+# ── Vietnamese stocks (SSI FastConnect Data — official API) ───────────────────────
+# Register at https://iboard.ssi.com.vn → FastConnect Data to get a ConsumerID +
+# Secret, then put them in ~/.patroam/secrets.json. Powers "stock price VNM",
+# "VN-Index", "giá cổ phiếu", and folds the index into "what's up".
+SSI_CONSUMER_ID = os.environ.get("SSI_CONSUMER_ID", "")
+SSI_CONSUMER_SECRET = os.environ.get("SSI_CONSUMER_SECRET", "")
+SSI_DATA_URL = os.environ.get("SSI_DATA_URL", "https://fc-data.ssi.com.vn/")
 
 # ── Voice / wake word ──────────────────────────────────────────────────────────
 # Any of these phrases wakes PATROAM. Include the common speech-to-text
@@ -196,6 +252,14 @@ CHROMA_DIR = os.environ.get(
 # ── Knowledge graph (entities + relationships) ──────────────────────────────────
 GRAPH_FILE = os.environ.get(
     "PATROAM_GRAPH_FILE", os.path.join(os.path.expanduser("~"), ".patroam", "graph.json"))
+# Timestamped knowledge-graph backups (auto on launch; keep the most recent N).
+BACKUP_DIR = os.environ.get(
+    "PATROAM_BACKUP_DIR", os.path.join(os.path.expanduser("~"), ".patroam", "backups"))
+BACKUP_KEEP = int(os.environ.get("PATROAM_BACKUP_KEEP", "20"))
+
+# ── Notes (the Note-taker writes here; indexed into the graph under "Notes") ─────
+NOTES_DIR = os.environ.get(
+    "PATROAM_NOTES_DIR", os.path.join(os.path.expanduser("~"), ".patroam", "notes"))
 
 # ── MCP connectors ──────────────────────────────────────────────────────────────
 # A JSON file listing MCP servers to connect to, giving PATROAM external tools

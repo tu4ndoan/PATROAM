@@ -99,6 +99,14 @@ def _rank(items, query):
     return ranked
 
 
+def latest_items(query="", n=None):
+    """Ranked news items as structured dicts [{title, link, source, _score}] —
+    used by the background news watcher to diff against what it's already seen."""
+    n = n or config.NEWS_MAX
+    items = _fetch_all()
+    return _rank(items, query)[:n] if items else []
+
+
 def latest(query="", n=None):
     n = n or config.NEWS_MAX
     items = _fetch_all()

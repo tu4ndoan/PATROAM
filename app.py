@@ -52,7 +52,9 @@ def _bootstrap():
                         ("mcp", "mcp"), ("reportlab", "reportlab"),
                         ("fitz", "pymupdf"),   # best .pdf text extraction (Unicode)
                         ("pypdf", "pypdf"),    # .pdf fallback reader
-                        ("PIL", "Pillow")]:    # screen capture for the vision model
+                        ("PIL", "Pillow"),     # screen capture for the vision model
+                        ("playwright", "playwright"),   # (legacy) live scraping
+                        ("browser_cookie3", "browser-cookie3")]:  # silent Fab CSV download
         try:
             __import__(module)
         except ImportError:
@@ -119,6 +121,42 @@ def _start_rag():
     threading.Thread(target=work, daemon=True).start()
 
 
+def _backup_graph_on_launch():
+    """Snapshot the knowledge graph at startup so a bad session can't lose it."""
+    try:
+        from patroam import graph
+        p = graph.backup()
+        _log(f"graph backed up: {p}")
+    except Exception as e:
+        _log(f"graph backup skipped: {e}")
+
+
+def _start_integrations():
+    """Background integrations that work in any run mode: the automatic news
+    watch, and (if tokens are configured) the Slack bot for phone access."""
+    try:
+        from patroam import news_watch
+        if news_watch.start():
+            _log("news watch started")
+    except Exception as e:
+        _log(f"news watch skipped: {e}")
+    try:
+        from patroam import config as _cfg
+        if _cfg.slack_enabled():
+            try:
+                import slack_bolt  # noqa: F401
+            except ImportError:
+                print("Installing slack-bolt…")
+                try:
+                    _install("slack_bolt")
+                except Exception as e:
+                    _log(f"slack-bolt install failed: {e}")
+            from patroam import slack_bot
+            _log(f"slack started: {slack_bot.start()}")
+    except Exception as e:
+        _log(f"slack skipped: {e}")
+
+
 def main():
     _log(f"start argv={sys.argv[1:]} exe={sys.executable}")
     if not _acquire_single_instance():
@@ -131,6 +169,8 @@ def main():
     #_start_daemon()  # never auto-start the headless daemon; the desktop orb
     #                   already listens. Running both = overlapping voices.
     _start_rag()
+    _backup_graph_on_launch()
+    _start_integrations()
     args = sys.argv[1:]
     if "--web" in args:
         for module, pkg in [("fastapi", "fastapi"), ("uvicorn", "uvicorn[standard]")]:

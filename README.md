@@ -43,9 +43,12 @@ models), and it auto-switches to the best model for the task.
   blocks + Copy buttons**, image thumbnails, and clickable links to files it
   creates.
 - A **🧠 Inspector** with two tabs:
-  - **Knowledge Graph** — a 3D, rotatable, document-clustered graph; **search** a
-    node, **click to focus** (it centers and highlights connections), **fullscreen
-    (⤢)**, and **rename / add-link / delete** nodes live.
+  - **Knowledge Graph** — a 3D/flat, document-clustered graph: **search** a node,
+    **click to focus** (it centres, highlights connections, and shows the source
+    documents + any images they contain), **fullscreen (⤢)**, **flat ⇄ sphere
+    toggle (⊞)**, **drag nodes** (neighbours follow), **middle-mouse pan**, per-node
+    **colours** (persisted across restarts), and **rename / add-link / delete**
+    live. Relation labels appear on hover/selection; hub names always show.
   - **RAG** — shows the active backend, indexed sources, a **Re-index** button,
     and a test-retrieval box that proves what gets retrieved.
 
@@ -82,14 +85,27 @@ models), and it auto-switches to the best model for the task.
 - **Multi-step & interactive** — for non-trivial builds it confirms first, asking
   *"Provider or Riverpod, Sir?"* with **clickable A/B buttons**, then executes.
 
-### ⚙️ Skills (deterministic, work on any model)
-- **Open / close apps** ("open Spotify", "close Chrome"), **play music** (Spotify
-  Liked Songs).
+### 📱 Chat from your phone (Slack)
+- Add Slack tokens and PATROAM connects over **Socket Mode** — no public URL, no
+  port-forwarding; it keeps running on your PC. **DM the bot** (or @mention it) and
+  you get the full assistant from anywhere. Proactive alerts (e.g. the news watch)
+  are DM'd to you too. Setup steps are in `patroam/slack_bot.py`.
+
+### ⚙️ Live data & skills — understood by the LLM, not keywords
+Intent is recognised by the **model (an LLM router)**, so any phrasing works; the
+matching skill then returns the *exact* answer (precise numbers, clickable links —
+no model drift). A regex backstop keeps these working offline.
+- **Gold price** — *"gold price" / "giá vàng"* → spot in **USD and VND**.
+- **Vietnamese stocks** — *"how's VNM doing", "VN-Index"* → live price/index via
+  **SSI FastConnect**.
+- **Fab sales** — *"fab sales"* → fetches your latest Fab CSV via Brave and reads
+  the numbers.
 - **News** — *"what's up"* reads headlines from **your trusted RSS feeds**
-  (`config.NEWS_FEEDS` or `~/.patroam/news.json`, ranked by your interests); it
-  speaks the titles and puts **clickable links** in the chat.
-- **Meta Ads** — *"how are my ads doing"* reads spend / impressions / clicks / CTR.
-- **MCP connectors** — external MCP servers (stdio / HTTP / OAuth) become callable.
+  (`config.NEWS_FEEDS` or `~/.patroam/news.json`, ranked by your interests); speaks
+  the titles and puts **clickable links** in chat. A background **news watch**
+  checks every 5 minutes and alerts you to anything new.
+- **Meta Ads** — *"how are my ads doing"* → spend / impressions / clicks / CTR.
+- **Open / close apps**, **play music**, and **MCP connectors** (stdio / HTTP / OAuth).
 
 ---
 
@@ -97,7 +113,7 @@ models), and it auto-switches to the best model for the task.
 
 ```bash
 pip install -r requirements.txt        # or let app.py auto-install on first run
-ollama serve && ollama pull llama3     # a local model to start on
+ollama serve && ollama pull qwen3.5    # default local model (any model works)
 
 python app.py                 # desktop orb (default)
 python app.py --web           # browser app (FastAPI + WebSocket)
@@ -107,9 +123,9 @@ python app.py --daemon        # headless, local wake-word only
 ```
 
 Only **one** instance runs at a time (a single-instance lock prevents two voices
-talking at once). To start automatically at login, keep `PATROAM.vbs` in your
-Startup folder (it runs `pythonw app.py`). Startup issues are logged to
-`~/.patroam/startup.log`.
+talking at once). To start automatically at login, keep `patroam_autostart.vbs`
+in your Startup folder (it runs `pythonw app.py`). Startup issues are logged to
+`~/.patroam/startup.log`; set `PATROAM_DEBUG=1` to open the webview DevTools.
 
 ---
 
@@ -117,7 +133,9 @@ Startup folder (it runs `pythonw app.py`). Startup issues are logged to
 
 - **Secrets** → `~/.patroam/secrets.json` (see `secrets.example.json`), loaded at
   startup: `ANTHROPIC_API_KEY`, `META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID`,
-  `NEWSAPI_KEY`. Never put keys in tracked source.
+  `NEWSAPI_KEY`, `GOLD_API_KEY`, `SSI_CONSUMER_ID`, `SSI_CONSUMER_SECRET`,
+  `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_DM_CHANNEL`. Never put keys in
+  tracked source.
 - **News feeds** → `~/.patroam/news.json`: `{"feeds": ["…rss…"], "interests": ["ai","vietnam"]}`.
 - **Knowledge** → drop documents in `~/.patroam/knowledge`.
 - **Workspace** → created files/projects go to `~/PATROAM`.
@@ -148,7 +166,10 @@ patroam/
   rag.py                chunk · embed · retrieve (ChromaDB / JSON), VNI/PDF read
   vision.py             screen capture + image normalization
   vni.py                VNI-Win → Unicode decoder (legacy Vietnamese PDFs)
-  news.py               RSS/Atom feeds (+ NewsAPI fallback), interest ranking
+  news.py / news_watch.py   RSS/Atom feeds (+ NewsAPI), ranking + 5-min auto-watch
+  gold.py · stocks.py · fab.py   gold price · SSI Vietnamese stocks · Fab sales reader
+  brain.py · slack_bot.py · notify.py   headless text agent · Slack (Socket Mode) · alert hub
+  media.py              images pulled from documents (graph node previews)
   meta_ads.py           Meta Ads stats          llm.py  shared completion registry
   mcp_client.py         MCP connectors          mcp_oauth.py  MCP OAuth
   ui/webview_app.py     desktop controller + pywebview bridge
@@ -177,5 +198,7 @@ patroam/
 4. ✅ Memory + knowledge graph (3D inspector, live editing)
 5. ✅ RAG + vector DB (PDF, VNI decode) · ✅ vision (screen + images)
 6. ✅ Interactive widgets · multi-step confirm-then-build
-7. ✅ News (RSS) · Meta Ads · MCP connectors
-8. ⏳ OpenAI (GPT) provider · richer per-framework scaffolders · cross-device hub
+7. ✅ News (RSS) + 5-min watch · gold · SSI VN stocks · Fab · Meta Ads · MCP
+8. ✅ Slack (chat from your phone) · LLM-routed intent · graph colours/flat/drag/pan
+9. ⏳ See **[PLAN.md](PLAN.md)** — Planner agent (ClickUp), Note-taker, Mail triage,
+   unified launch briefing.

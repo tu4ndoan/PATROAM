@@ -11,7 +11,7 @@ import os
 import queue
 import threading
 
-from .. import config, files, graph, rag, skills
+from .. import config, files, graph, media, notify, rag, skills
 from ..agent import Agent
 from ..providers import make_provider, pick_default
 from ..voice.listener import WakeWordListener
@@ -44,6 +44,8 @@ class Controller:
         # re-entrantly from inside an incoming API call.
         self._jsq = queue.Queue()
         threading.Thread(target=self._js_pump, daemon=True).start()
+        # Receive proactive messages (e.g. the news watch) → speak + show them.
+        notify.subscribe(self._notify)
 
     # ── UI bridge ───────────────────────────────────────────────────────────
     def attach(self, window):
@@ -100,6 +102,19 @@ class Controller:
         """Show clickable links to files PATROAM just created."""
         if paths:
             self._eval(f"window.patroam.chatFiles({json.dumps(paths)})")
+
+    def _notify(self, payload):
+        """A proactive alert (news, etc.) arrived: show it in chat, and speak it
+        if PATROAM isn't already busy talking/answering."""
+        try:
+            show = (payload or {}).get("show") or ""
+            say = (payload or {}).get("say") or show
+            if show:
+                self._chat_done(show)
+            if say and self.tts_enabled and not self.is_responding and not self._speaking:
+                self.speak(say)
+        except Exception:
+            pass
 
     def greet(self):
         """Speak a time-of-day greeting and log it (used on startup and on wake)."""
@@ -208,6 +223,16 @@ class Controller:
             return
         if echo:
             self._chat_user(text)
+        # "Change the knowledge-graph view" (flat / sphere / toggle) — handled in the UI.
+        gm = skills.graph_view_mode(text)
+        if gm:
+            self._eval("window.patroam.setGraphMode(%s)" % json.dumps(gm))
+            say = ("I've flattened the knowledge graph." if gm == "flat"
+                   else "Back to the sphere view." if gm == "sphere"
+                   else "I've changed the graph view.")
+            self.set_status(say)
+            self.speak(say)
+            return
         # An attached image (dropped/pasted into the chat) → straight to the vision model.
         if images:
             from .. import vision
@@ -310,12 +335,33 @@ class Controller:
         self._summarizing = config.SPEAK_SUMMARY   # voice only the lead summary
         self._spoken_len = 0
 
+        # Watchdog: if the model never calls back (e.g. a cloud model stalls / is
+        # offline), don't leave the UI stuck on "thinking" with is_responding=True
+        # forever — that silently drops every later message. Auto-recover.
+        def _watchdog():
+            if self.is_responding:
+                self.is_responding = False
+                self.agent.cancel()
+                self.set_status("The model didn't respond — please try again, Sir.")
+                self._set_busy(False)
+                self.rest()
+        self._resp_watch = threading.Timer(90, _watchdog)
+        self._resp_watch.daemon = True
+        self._resp_watch.start()
+
+        def _cancel_watch():
+            try:
+                self._resp_watch.cancel()
+            except Exception:
+                pass
+
         def on_token(t):
             self._chat_token(t)
             self._buf += t
             self._flush_sentences()     # speak each sentence as soon as it's ready
 
         def on_done(full):
+            _cancel_watch()
             self.is_responding = False
             self.set_status("")
             self._chat_done(full)
@@ -346,6 +392,7 @@ class Controller:
                 self.rest()
 
         def on_error(err):
+            _cancel_watch()
             self.is_responding = False
             self.set_status(f"error: {err}")
             self._set_busy(False)
@@ -353,7 +400,10 @@ class Controller:
 
         # Provider callbacks fire on a worker thread; pushing JS from there is
         # fine (it goes through the pump thread).
-        self.agent.send(text, on_token, on_done, on_error, images=images, model=model)
+        try:
+            self.agent.send(text, on_token, on_done, on_error, images=images, model=model)
+        except Exception as e:
+            on_error(e)
 
     # ── always-on ─────────────────────────────────────────────────────────────
     def _ensure_listener(self):
@@ -489,6 +539,11 @@ class JsApi:
         threading.Thread(target=self._c.handle, args=(text,), daemon=True).start()
         return True
 
+    def abort(self):
+        """Abort everything in flight: stop generation + speech (from the button)."""
+        self._c._stop_now()
+        return True
+
     def send_image(self, text, image_b64):
         """Send a message with an image dropped/pasted into the chat. The page
         already showed the thumbnail, so don't echo the user bubble again."""
@@ -577,11 +632,37 @@ class JsApi:
 
     # ── Inspector: read-only views into RAG + the knowledge graph ──────────────
     def get_graph(self):
-        """Triples for the knowledge-graph visualizer."""
+        """Triples + custom node colours for the knowledge-graph visualizer."""
         try:
-            return {"triples": graph.all_triples()}
+            return {"triples": graph.all_triples(), "colors": graph.get_colors()}
         except Exception as e:
-            return {"triples": [], "error": str(e)}
+            return {"triples": [], "colors": {}, "error": str(e)}
+
+    def graph_set_color(self, name, color):
+        """Persist a node's colour (hex '#rrggbb', or '' to reset)."""
+        try:
+            return {"ok": bool(graph.set_color(name, color))}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def get_node(self, name):
+        """Detail for a clicked graph node: the source documents it came from and
+        any images in those documents (as inline data URIs)."""
+        try:
+            docs = graph.node_docs(name)
+            images = []
+            for d in docs:
+                for p in media.images_for_doc(d):
+                    uri = media.data_uri(p)
+                    if uri:
+                        images.append({"src": uri, "doc": d})
+                    if len(images) >= 8:
+                        break
+                if len(images) >= 8:
+                    break
+            return {"docs": docs, "images": images}
+        except Exception as e:
+            return {"docs": [], "images": [], "error": str(e)}
 
     def get_rag(self):
         """Index status: backend, chunk count, source files."""
@@ -657,4 +738,8 @@ def run(provider=None):
     except Exception:
         pass
 
-    webview.start()
+    # debug=True enables the webview DevTools (right-click → Inspect → Console),
+    # so JavaScript errors in the orb/chat UI are visible. Toggle with
+    # PATROAM_DEBUG=0 to disable.
+    debug = os.environ.get("PATROAM_DEBUG", "1") not in ("0", "false", "False", "")
+    webview.start(debug=debug)

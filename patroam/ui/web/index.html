@@ -5,11 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <title>PATROAM</title>
 <style>
-  :root { --accent:#7b5cff; --muted:#6b7488; --fg:#e8ecf7; }
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
+  /* tu4ndoan design tokens — minimal · futuristic · monochromatic · technical */
+  :root {
+    --bg:#0a0a0a; --surface:#111111; --border:#1a1a1a; --hover:#18181b;
+    --fg:#ffffff; --muted:#a1a1aa; --muted2:#71717a; --accent:#d4d4d8;
+    --font-mono:"JetBrains Mono","IBM Plex Mono","SF Mono",ui-monospace,monospace;
+    --font-display:"Share Tech Mono","JetBrains Mono",ui-monospace,monospace;
+  }
   * { box-sizing:border-box; }
-  html, body { margin:0; height:100%; overflow:hidden; background:#05030d;
-    font-family:"Courier New", ui-monospace, monospace; color:var(--fg);
-    -webkit-user-select:none; user-select:none; }
+  html, body { margin:0; height:100%; overflow:hidden; color:var(--fg);
+    font-family:var(--font-mono); -webkit-user-select:none; user-select:none;
+    background-color:var(--bg);
+    /* subtle technical grid backdrop (shows behind the orb) */
+    background-image:
+      linear-gradient(to right, rgba(26,26,26,.55) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(26,26,26,.55) 1px, transparent 1px);
+    background-size:64px 64px; }
   #orb { position:fixed; inset:0; display:block; }
   #ui { position:fixed; inset:0; pointer-events:none; }
   #ui > * { pointer-events:auto; }
@@ -35,6 +47,8 @@
   .btn:hover { border-color:var(--accent); }
   .btn.on { color:#22c55e; border-color:#22c55e; box-shadow:0 0 14px rgba(34,197,94,.35); }
   .btn.rec { color:#ef4444; border-color:#ef4444; box-shadow:0 0 16px rgba(239,68,68,.4); }
+  .btn.stopbtn { color:#ff6b6b; border-color:rgba(239,68,68,.5); }
+  .btn.stopbtn:hover { border-color:#ef4444; box-shadow:0 0 14px rgba(239,68,68,.45); }
   #text { flex:1; min-width:60px; background:rgba(8,6,16,.7); color:var(--fg);
     border:1px solid rgba(150,130,230,.25); border-radius:10px; padding:10px 12px;
     font-family:inherit; font-size:14px; outline:none; }
@@ -158,6 +172,17 @@
   .dbtn.danger:hover { border-color:#ef4444; box-shadow:0 0 10px rgba(239,68,68,.4); }
   .detail-form { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
   .detail-form:empty { display:none; }
+  .detail-color { display:flex; align-items:center; gap:8px; margin-top:8px; }
+  .detail-color .dlabel { font-size:11px; color:var(--muted); }
+  .detail-color input[type=color] { width:36px; height:24px; padding:0; cursor:pointer;
+    border:1px solid var(--border); border-radius:6px; background:var(--surface); }
+  #gFlat { right:44px; }
+  .detail-media:empty { display:none; }
+  .detail-docs { font-size:11px; color:var(--muted); margin-top:10px; }
+  .detail-imgs { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .detail-imgs img { width:80px; height:80px; object-fit:cover; border-radius:8px; cursor:pointer;
+    border:1px solid rgba(123,92,255,.35); transition:transform .12s, box-shadow .12s; }
+  .detail-imgs img:hover { transform:scale(1.04); box-shadow:0 0 12px rgba(123,92,255,.45); }
   .dinp { font-size:12px; padding:6px 8px; min-width:120px; flex:1;
     font-family:"Segoe UI", system-ui, sans-serif; }
   .meta { font-size:12px; color:var(--muted); }
@@ -180,6 +205,107 @@
     color:var(--fg); border-radius:8px; padding:7px 10px; font-family:inherit; font-size:12px; white-space:nowrap; }
   .smallbtn:hover { border-color:var(--accent); }
   .empty { color:var(--muted); font-size:12px; text-align:center; padding:20px 0; }
+
+  /* ============================================================
+     tu4ndoan theme — minimal · monochromatic · technical · editorial.
+     Overrides the earlier neon styling. The orb itself is untouched.
+     ============================================================ */
+  #ui, .chat, .insp, .msg, .codeblk, .kg-detail, .kg-overlay, .detail-rel,
+  .askbtn, .dbtn, .copybtn, .dinp, .kg-list { font-family:var(--font-mono); }
+  .brand, .insp-title { font-family:var(--font-display); color:var(--fg);
+    text-shadow:none; letter-spacing:.18em; font-weight:400; opacity:.92; }
+  .status { color:var(--muted); text-shadow:none; letter-spacing:.14em;
+    font-size:11px; text-transform:uppercase; }
+  .hint, .ghint { color:var(--muted2); text-shadow:none; }
+
+  select, .glass { background:rgba(17,17,17,.7); border:1px solid var(--border);
+    border-radius:8px; color:var(--fg); }
+  select:hover, .glass:hover { border-color:var(--accent); }
+
+  .bar { background:rgba(17,17,17,.72); border:1px solid var(--border);
+    border-radius:12px; box-shadow:0 8px 40px rgba(0,0,0,.6); }
+  .btn { background:rgba(24,24,27,.85); border:1px solid var(--border); color:var(--fg);
+    border-radius:8px; font-weight:500; letter-spacing:.04em; }
+  .btn:hover { border-color:var(--accent); background:var(--hover); }
+  .btn.on { color:var(--fg); border-color:var(--accent); background:var(--hover); box-shadow:none; }
+  .btn.rec { color:#fff; border-color:#fff; box-shadow:0 0 0 1px rgba(255,255,255,.45); }
+  .btn.stopbtn { color:var(--muted); border-color:var(--border); box-shadow:none; }
+  .btn.stopbtn:hover { color:#fff; border-color:#fff; box-shadow:none; }
+  #text { background:#0a0a0a; border:1px solid var(--border); color:var(--fg); border-radius:8px; }
+  #text:focus { border-color:var(--accent); }
+  #send { background:var(--fg); border-color:var(--fg); color:#0a0a0a; font-weight:700; }
+  #send:hover { background:var(--accent); border-color:var(--accent); }
+
+  .chat { background:rgba(10,10,10,.9); border-left:1px solid var(--border); }
+  .chat-head { color:var(--fg); border-bottom:1px solid var(--border);
+    font-family:var(--font-display); letter-spacing:.12em; font-weight:400; }
+  .msg { border-radius:8px; }
+  .msg.you { background:var(--surface); border:1px solid var(--border); }
+  .msg.bot { background:rgba(24,24,27,.6); border:1px solid var(--border); }
+  .msg .who { color:var(--muted2); text-transform:uppercase; letter-spacing:.08em; }
+  .msg a.lnk { color:var(--fg); text-decoration:underline; text-decoration-color:var(--muted2);
+    text-underline-offset:3px; }
+  .msg a.lnk:hover { color:var(--fg); text-decoration-color:var(--fg); }
+  .msg a.filelnk { color:var(--fg); border:1px solid var(--border); border-radius:6px; }
+  .msg a.filelnk:hover { border-color:var(--accent); box-shadow:none; }
+  .msg img.att, .imgprev img { border:1px solid var(--border); }
+
+  .askbtn { background:var(--surface); border:1px solid var(--border); color:var(--fg);
+    border-radius:8px; font-family:var(--font-mono); }
+  .askbtn:hover { border-color:var(--accent); background:var(--hover); box-shadow:none; }
+
+  .codeblk pre { background:#111; border:1px solid var(--border); border-radius:8px; }
+  .codeblk code { color:#d4d4d8; font-family:var(--font-mono); }
+  .codeblk .c-kw { color:#fafafa; font-weight:600; }
+  .codeblk .c-str { color:#a1a1aa; }
+  .codeblk .c-num { color:#e4e4e7; }
+  .codeblk .c-cmt { color:#52525b; font-style:italic; }
+  .copybtn { background:rgba(17,17,17,.92); border:1px solid var(--border); color:var(--muted);
+    font-family:var(--font-mono); }
+  .copybtn:hover { border-color:var(--accent); color:var(--fg); box-shadow:none; }
+
+  body.dragging::after { background:rgba(10,10,10,.7); border:2px dashed var(--accent); color:var(--fg); }
+
+  .insp { background:rgba(10,10,10,.94); border-right:1px solid var(--border); }
+  .insp-head { border-bottom:1px solid var(--border); }
+  .tab { background:var(--surface); border:1px solid var(--border); color:var(--muted);
+    letter-spacing:.1em; }
+  .tab.sel { color:#0a0a0a; background:var(--fg); border-color:var(--fg); box-shadow:none; }
+  #graphCv { border:1px solid var(--border);
+    background:radial-gradient(120% 120% at 50% 0%, #141414, #0a0a0a); }
+  .graphwrap.full #graphCv { background:radial-gradient(120% 120% at 50% -10%, #141414, #060606); }
+  .gexpand, .kg-search { background:rgba(17,17,17,.8); border:1px solid var(--border); color:var(--fg); }
+  .gexpand:hover { border-color:var(--accent); box-shadow:none; }
+  .kg-overlay { background:rgba(10,10,10,.92); border:1px solid var(--border); }
+  .kg-detail { background:var(--surface); border:1px solid var(--border); }
+  .detail-title { color:var(--fg); }
+  .detail-clear { color:var(--muted); }
+  .detail-clear:hover { color:var(--fg); }
+  .detail-sub, .detail-rel .r, .kg-list .rel, .hit .src { color:var(--muted); }
+  .detail-rel { color:var(--muted); }
+  .detail-rel b { color:var(--fg); }
+  .dbtn { background:var(--surface); border:1px solid var(--border); color:var(--fg); }
+  .dbtn:hover { border-color:var(--accent); box-shadow:none; }
+  .dbtn.danger { color:var(--fg); border-color:var(--muted2); }
+  .dbtn.danger:hover { border-color:#fff; box-shadow:none; }
+  .detail-imgs img { border:1px solid var(--border); }
+  .detail-imgs img:hover { border-color:var(--accent); box-shadow:none; }
+  .chip { border:1px solid var(--border); color:var(--muted); border-radius:6px; }
+  .kg-list { color:var(--muted); }
+  .meta { color:var(--muted2); }
+  .meta b { color:var(--fg); }
+  .hit { background:var(--surface); border:1px solid var(--border); }
+  .hit .score { color:var(--fg); }
+  .hit .txt { color:var(--muted); }
+  .smallbtn { background:var(--surface); border:1px solid var(--border); color:var(--fg); }
+  .smallbtn:hover { border-color:var(--accent); }
+  .empty { color:var(--muted2); }
+
+  ::-webkit-scrollbar { width:10px; height:10px; }
+  ::-webkit-scrollbar-track { background:#0a0a0a; }
+  ::-webkit-scrollbar-thumb { background:var(--border); border-radius:999px; border:2px solid #0a0a0a; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--muted2); }
+  ::selection { background:var(--accent); color:#0a0a0a; }
 </style>
 </head>
 <body>
@@ -203,6 +329,7 @@
         <div id="graphWrap" class="graphwrap">
           <input id="kgSearch" class="kg-search glass" placeholder="🔍 Search node…" />
           <canvas id="graphCv"></canvas>
+          <span class="gexpand" id="gFlat" title="Toggle flat / sphere view">⊞</span>
           <span class="gexpand" id="gExpand" title="Expand / collapse">⤢</span>
           <div class="ghint">drag to rotate · scroll to zoom · click a node to focus · Esc to exit</div>
           <div class="kg-overlay" id="kgOverlay"></div>
@@ -237,11 +364,25 @@
       <div id="imgPreview" class="imgprev"></div>
       <input id="text" placeholder="Type, or drop/paste an image…" />
       <button id="send" class="btn">→</button>
+      <button id="stop" class="btn stopbtn" title="Abort — stop generating & speaking">⏹</button>
     </div>
   </div>
 
 <script>
 "use strict";
+// ── Resilience: surface any JS error to the status line, and make sure the
+// Python bridge is marked ready even if some later script line throws (so chat
+// and status pushes keep working). ────────────────────────────────────────────
+(function(){
+  function showErr(msg){ try{ var s=document.getElementById('status');
+    if(s){ s.style.color='#ff8080'; s.textContent='⚠ '+msg; } if(window.console) console.error(msg); }catch(_){} }
+  window.addEventListener('error', function(e){ showErr((e.message||'script error')+(e.lineno?(' @line '+e.lineno):'')); });
+  window.addEventListener('unhandledrejection', function(e){ showErr('promise: '+(((e.reason)&&e.reason.message)||e.reason||'')); });
+  // Call ready() ASAP and keep retrying, independent of the main boot(), so a
+  // single rendering bug can never leave the UI permanently mute.
+  (function early(){ try{ var a=(window.pywebview&&window.pywebview.api);
+    if(a&&a.ready){ a.ready(); } else { setTimeout(early,150); } }catch(_){ setTimeout(early,200); } })();
+})();
 // ── Neural-network orb, pure Canvas2D (no WebGL / no libraries / offline) ──────
 const cv = document.getElementById('orb');
 const ctx = cv.getContext('2d');
@@ -257,12 +398,13 @@ function mix(a,b,t){ return [Math.round(lerp(a[0],b[0],t)),Math.round(lerp(a[1],
 function rgba(c,a){ return `rgba(${c[0]},${c[1]},${c[2]},${a})`; }
 
 // ── State presets (purple-nebula → magenta) ────────────────────────────────────
+// tu4ndoan palette — cool cyan/indigo orb (no purple/pink), states vary brightness.
 const STATES = {
-  idle:      { c1:hex('#3357ff'), c2:hex('#c23bff'), spin:0.05, flow:0.8, energy:0.55, auto:0 },
-  sleeping:  { c1:hex('#2f6bff'), c2:hex('#b13bff'), spin:0.06, flow:0.7, energy:0.6,  auto:0 },
-  listening: { c1:hex('#2f9bff'), c2:hex('#ff3bd0'), spin:0.16, flow:1.6, energy:1.0,  auto:3.0 },
-  thinking:  { c1:hex('#6a4bff'), c2:hex('#ff3bd0'), spin:0.30, flow:2.2, energy:1.0,  auto:1.5 },
-  speaking:  { c1:hex('#22c3ff'), c2:hex('#ff4bd6'), spin:0.20, flow:2.0, energy:1.2,  auto:1.1 },
+  idle:      { c1:hex('#7dd3fc'), c2:hex('#818cf8'), spin:0.05, flow:0.8, energy:0.55, auto:0 },
+  sleeping:  { c1:hex('#60a5fa'), c2:hex('#818cf8'), spin:0.06, flow:0.7, energy:0.6,  auto:0 },
+  listening: { c1:hex('#38bdf8'), c2:hex('#a5b4fc'), spin:0.16, flow:1.6, energy:1.0,  auto:3.0 },
+  thinking:  { c1:hex('#818cf8'), c2:hex('#38bdf8'), spin:0.30, flow:2.2, energy:1.0,  auto:1.5 },
+  speaking:  { c1:hex('#22d3ee'), c2:hex('#818cf8'), spin:0.20, flow:2.0, energy:1.2,  auto:1.1 },
 };
 let target = STATES.idle;
 const cur = { c1:target.c1.slice(), c2:target.c2.slice(), spin:target.spin, flow:target.flow, energy:target.energy, auto:0 };
@@ -348,11 +490,16 @@ function frame(now){
   // Background + starfield.
   ctx.globalCompositeOperation='source-over';
   const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,Math.max(W,H)*0.7);
-  bg.addColorStop(0,'#100726'); bg.addColorStop(1,'#04030a');
+  bg.addColorStop(0,'#141414'); bg.addColorStop(1,'#0a0a0a');
   ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  // tu4ndoan technical grid, drawn on the canvas so it shows under the orb.
+  ctx.strokeStyle='rgba(255,255,255,0.035)'; ctx.lineWidth=1; ctx.beginPath();
+  for(let gx=0; gx<=W; gx+=64){ ctx.moveTo(gx,0); ctx.lineTo(gx,H); }
+  for(let gy=0; gy<=H; gy+=64){ ctx.moveTo(0,gy); ctx.lineTo(W,gy); }
+  ctx.stroke();
   ctx.globalCompositeOperation='lighter';
   for(let i=0;i<stars.length;i++){ const s=stars[i]; const a=s.b*(0.4+0.6*Math.sin(t*2+s.ph));
-    ctx.fillStyle='rgba(150,160,220,'+a.toFixed(3)+')'; ctx.fillRect(s.x,s.y,1.3,1.3); }
+    ctx.fillStyle='rgba(170,175,190,'+a.toFixed(3)+')'; ctx.fillRect(s.x,s.y,1.3,1.3); }
 
   // Project nodes.
   for(let n=0;n<nodes.length;n++){ const p=nodes[n];
@@ -494,6 +641,8 @@ function doSend(){ const a=api(); if(!a) return; const v=$('text').value.trim();
   } else if(v){ a.send(v); $('text').value=''; } }
 $('send').onclick=doSend;
 $('text').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doSend(); } });
+$('stop').onclick=()=>{ const a=api(); if(a&&a.abort) a.abort(); window.patroam.setStatus('stopped'); };
+addEventListener('keydown', e=>{ if(e.key==='Escape' && !$('graphWrap').classList.contains('full')){ const a=api(); if(a&&a.abort) a.abort(); } });
 
 // 📎 file picker
 $('attach').onclick=()=>$('file').click();
@@ -559,12 +708,37 @@ $('gExpand').onclick=(e)=>{ e.stopPropagation(); setFull(!$('graphWrap').classLi
 addEventListener('keydown',e=>{ if(e.key==='Escape') setFull(false); });
 
 // ── 3D knowledge graph (Canvas2D projection — rotate / drag / zoom / click) ─────
-const G={ nodes:[], edges:[], byId:{}, run:false, raf:0, t:0, hot:0, sel:null,
-  rotX:-0.18, rotY:0.5, zoom:1.05, spin:true, anchors:{} };
+const G={ nodes:[], edges:[], byId:{}, run:false, raf:0, t:0, hot:0, sel:null, hoverId:null,
+  rotX:-0.18, rotY:0.5, zoom:1.05, spin:true, anchors:{}, colors:{},
+  panX:0, panY:0, dragNode:null, panDrag:false, userPan:false,
+  flat: localStorage.getItem('kg_flat')==='1' };
 const PROJ_D=3.6, GRAPH_R=1.4;   // GRAPH_R = sphere shell radius
+
+// Flat (plane, no spin) ↔ sphere view. Toggled by the button or by voice
+// (Python calls window.patroam.setGraphMode). The choice is remembered.
+// NOTE: must come AFTER `const G` above — it reads G at call time.
+function syncFlatBtn(){ const b=$('gFlat'); if(b){ b.textContent=G.flat?'◎':'⊞';
+  b.title=G.flat?'Switch to sphere view':'Switch to flat (plane) view'; } }
+window.patroam.setGraphMode=function(mode){
+  if(mode==='toggle') G.flat=!G.flat; else G.flat=(mode==='flat');
+  localStorage.setItem('kg_flat', G.flat?'1':'0');
+  G.hot=1; G.spin=!G.flat; syncFlatBtn();
+  if(!insp.classList.contains('open')) toggleInsp(true);
+  if(!$('pane-kg').classList.contains('sel')){ const tb=document.querySelector('.tab[data-tab="kg"]'); if(tb) tb.click(); }
+  startGraphAnim();
+};
+$('gFlat').onclick=(e)=>{ e.stopPropagation(); window.patroam.setGraphMode('toggle'); };
+syncFlatBtn();
+const DEFAULT_NODE_RGB=[160,160,170];   // neutral grey; recolour nodes individually
 const PALETTE=[[124,158,255],[180,120,255],[80,200,255],[120,230,170],
   [255,150,200],[255,200,110],[150,255,230],[255,130,130],[200,160,255],[255,170,90]];
 function isUserId(id){ return (id||'').toLowerCase()==='you'; }
+// Canonical key (matches graph._canon) so colours survive case/spacing variants.
+function canon(s){ return (s||'').toLowerCase().replace(/[\s_\-]+/g,' ').trim(); }
+function hexToRgb(h){ const m=/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(h||'');
+  return m?[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]:null; }
+function rgbToHex(c){ return '#'+c.map(v=>('0'+Math.round(v).toString(16)).slice(-2)).join(''); }
+function nodeColor(id){ const cc=G.colors[canon(id)]; return (cc&&hexToRgb(cc))||DEFAULT_NODE_RGB; }
 
 function build3D(triples){
   const prev={}; G.nodes.forEach(n=>prev[n.id]={x:n.x,y:n.y,z:n.z,vx:n.vx,vy:n.vy,vz:n.vz});
@@ -586,11 +760,15 @@ function build3D(triples){
   names.forEach((n,i)=>{ const p=prev[n]; idx[n]=i;
     const grp=nodeGroup[n]||'General', a=G.anchors[grp]||[0,0,0];
     const j=()=>(Math.random()-0.5)*0.5;
-    N.push({ id:n, group:grp, color:gcol[grp]||PALETTE[0], deg:0, ph:Math.random()*6.28, born:p?1:0,
+    N.push({ id:n, group:grp, color:nodeColor(n), deg:0, ph:Math.random()*6.28, born:p?1:0,
       x:p?p.x:a[0]*GRAPH_R+j(), y:p?p.y:a[1]*GRAPH_R+j(), z:p?p.z:a[2]*GRAPH_R+j(),
       vx:p?p.vx:0, vy:p?p.vy:0, vz:p?p.vz:0, sx:null, sy:null, r:3, depth:0 }); });
-  const E=triples.filter(t=>idx[t.s]!=null&&idx[t.o]!=null)
-    .map(t=>({ a:idx[t.s], b:idx[t.o], rel:t.r.replace(/_/g,' ').toLowerCase(), p:Math.random() }));
+  const E=[], seenPair=new Set();
+  triples.filter(t=>idx[t.s]!=null&&idx[t.o]!=null).forEach(t=>{
+    const ai=idx[t.s], bi=idx[t.o]; if(ai===bi) return;          // no self-loops
+    const key=ai<bi?ai+'-'+bi:bi+'-'+ai;
+    if(seenPair.has(key)) return;                                // only ONE edge per node pair
+    seenPair.add(key); E.push({ a:ai, b:bi, rel:t.r.replace(/_/g,' ').toLowerCase() }); });
   E.forEach(e=>{ N[e.a].deg++; N[e.b].deg++; });
   G.nodes=N; G.edges=E; G.byId={}; N.forEach(n=>G.byId[n.id]=n); G.hot=1;
   if(G.sel && !G.byId[G.sel]) G.sel=null;
@@ -599,30 +777,34 @@ function build3D(triples){
 function step3D(){
   const N=G.nodes, E=G.edges, R=GRAPH_R;
   for(let i=0;i<N.length;i++){ const a=N[i];
-    // repulsion — gentle, short-range, so it spreads neighbours without flinging
-    // connected nodes to the far side of the sphere.
+    // repulsion — firm + wide, so every node pushes others away and labels/text
+    // stay readable (no overlap).
     for(let j=i+1;j<N.length;j++){ const b=N[j];
       let dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z, d2=dx*dx+dy*dy+dz*dz||0.001;
-      if(d2>1.2) continue;                       // only nearby nodes repel
-      const d=Math.sqrt(d2), rep=0.045/d2, fx=dx/d*rep, fy=dy/d*rep, fz=dz/d*rep;
+      if(d2>5) continue;
+      const d=Math.sqrt(d2), rep=0.09/d2, fx=dx/d*rep, fy=dy/d*rep, fz=dz/d*rep;
       a.vx+=fx;a.vy+=fy;a.vz+=fz; b.vx-=fx;b.vy-=fy;b.vz-=fz; }
     // gentle document-cluster bias toward the doc anchor
     const an=G.anchors[a.group]||[0,0,0];
-    a.vx+=(an[0]*R-a.x)*0.006; a.vy+=(an[1]*R-a.y)*0.006; a.vz+=(an[2]*R-a.z)*0.006;
-    // spherize: ease onto the sphere shell (radius R) → rounded, like the orb
-    const rad=Math.hypot(a.x,a.y,a.z)||0.001, k=(R-rad)/rad*0.03;
-    a.vx+=a.x*k; a.vy+=a.y*k; a.vz+=a.z*k; }
-  // springs (the dominant force): connected nodes pull CLOSE together
-  const L=0.32;
+    a.vx+=(an[0]*R-a.x)*0.004; a.vy+=(an[1]*R-a.y)*0.004;
+    if(G.flat){ a.vz+=(0-a.z)*0.2; }                // flat mode: collapse onto the z=0 plane
+    else { a.vz+=(an[2]*R-a.z)*0.004;
+      // spherize: ease onto the sphere shell (radius R) → rounded, like the orb
+      const rad=Math.hypot(a.x,a.y,a.z)||0.001, k=(R-rad)/rad*0.03;
+      a.vx+=a.x*k; a.vy+=a.y*k; a.vz+=a.z*k; } }
+  // springs: connected nodes pull together (comfortable rest length so they don't pile up)
+  const L=0.5;
   for(const e of E){ const a=N[e.a], b=N[e.b];
-    let dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,d=Math.hypot(dx,dy,dz)||0.001,f=(d-L)*0.09;
+    let dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,d=Math.hypot(dx,dy,dz)||0.001,f=(d-L)*0.05;
     const fx=dx/d*f,fy=dy/d*f,fz=dz/d*f;
     a.vx+=fx;a.vy+=fy;a.vz+=fz; b.vx-=fx;b.vy-=fy;b.vz-=fz; }
-  const cap=G.hot>0.02?0.06:0.02;
-  for(const a of N){ a.vx*=0.85;a.vy*=0.85;a.vz*=0.85;
+  const cap=G.hot>0.02?0.08:0.03, Rmax=R*(G.flat?3.2:1.9);
+  for(const a of N){
+    if(a===G.dragNode){ a.vx=a.vy=a.vz=0; if(a.born<1) a.born=Math.min(1,a.born+0.04); continue; }  // pinned to cursor
+    a.vx*=0.85;a.vy*=0.85;a.vz*=0.85;
     a.x+=Math.max(-cap,Math.min(cap,a.vx)); a.y+=Math.max(-cap,Math.min(cap,a.vy)); a.z+=Math.max(-cap,Math.min(cap,a.vz));
-    // radial (sphere) clamp — NOT a per-axis box, so it never looks cubic
-    const rad=Math.hypot(a.x,a.y,a.z); if(rad>R*1.7){ const s=R*1.7/rad; a.x*=s;a.y*=s;a.z*=s; }
+    // radial clamp — NOT a per-axis box, so it never looks cubic
+    const rad=Math.hypot(a.x,a.y,a.z); if(rad>Rmax){ const s=Rmax/rad; a.x*=s;a.y*=s;a.z*=s; }
     if(a.born<1) a.born=Math.min(1,a.born+0.04); }
   G.hot*=0.97;
 }
@@ -639,7 +821,8 @@ function render3D(){
   if(G.hot>0.03) step3D();   // settle, then freeze positions so nodes stop shaking
   // Rotation: focus on the selected node, else slow auto-spin (like the orb).
   const selN=G.sel?G.byId[G.sel]:null;
-  if(selN && !gDrag && G.focus){ const rr=Math.hypot(selN.x,selN.z);
+  if(G.flat){ G.rotX+=(0-G.rotX)*0.15; G.rotY+=(0-G.rotY)*0.15; }   // ease to a flat plane, no spin
+  else if(selN && !gDrag && G.focus){ const rr=Math.hypot(selN.x,selN.z);
     const tY=Math.atan2(-selN.x, selN.z||0.001), tX=Math.atan2(selN.y, rr||0.001);
     G.rotY+=(tY-G.rotY)*0.07; G.rotX+=(tX-G.rotX)*0.07;
     if(Math.abs(tY-G.rotY)<0.01 && Math.abs(tX-G.rotX)<0.01) G.focus=false; }
@@ -650,42 +833,58 @@ function render3D(){
   for(const n of G.nodes){ const x1=n.x*cosY+n.z*sinY, z1=-n.x*sinY+n.z*cosY;
     const y2=n.y*cosX-z1*sinX, z2=n.y*sinX+z1*cosX;
     const persp=PROJ_D/Math.max(1.0, PROJ_D-z2);   // clamp denom → persp always finite & positive
-    n.sx=cx+x1*persp*scale; n.sy=cy-y2*persp*scale; n.depth=z2;
-    n.r=Math.max(0.6,(3.2+Math.min(8,n.deg*1.3))*persp*(full?1.35:1)*(0.4+0.6*n.born)); }
+    n.persp=persp; n.bx=cx+x1*persp*scale; n.by=cy-y2*persp*scale; n.depth=z2;
+    n.r=Math.max(0.5,(1.2+Math.min(3,n.deg*0.5))*persp*(full?1.1:1)*(0.4+0.6*n.born)); }
+  // Centre the selected node in view (smooth pan); ease back to centre when none
+  // is selected — but hold the pan while you're dragging a node.
+  if(G.dragNode){ /* hold the pan while dragging a node */ }
+  else if(selN){ G.panX+=((cx-selN.bx)-G.panX)*0.12; G.panY+=((cy-selN.by)-G.panY)*0.12; }
+  else if(!G.userPan){ G.panX+=(0-G.panX)*0.12; G.panY+=(0-G.panY)*0.12; }   // recentre
+  // else: free pan set by middle-mouse drag — leave it where the user put it.
+  for(const n of G.nodes){ n.sx=n.bx+G.panX; n.sy=n.by+G.panY; }
   // Neighbour set of the selection (for focus highlighting).
   let neigh=null;
   if(G.sel){ neigh=new Set([G.sel]); G.edges.forEach(e=>{ const a=G.nodes[e.a].id,b=G.nodes[e.b].id;
     if(a===G.sel)neigh.add(b); if(b===G.sel)neigh.add(a); }); }
-  // Edges + flowing particles (additive glow).
+  // Edges — thin, calm cool lines (cyan→indigo), like the orb's connections.
   x.globalCompositeOperation='lighter';
   for(const e of G.edges){ const a=G.nodes[e.a], b=G.nodes[e.b];
     const on=!G.sel || a.id===G.sel || b.id===G.sel;
-    const al=G.sel?(on?0.7:0.04):0.4;
+    const al=G.sel?(on?0.4:0.03):0.14;
     const grd=x.createLinearGradient(a.sx,a.sy,b.sx,b.sy);
-    grd.addColorStop(0,'rgba(80,150,255,'+al+')'); grd.addColorStop(1,'rgba(176,96,255,'+al+')');
-    x.strokeStyle=grd; x.lineWidth=(on&&G.sel?1.9:1.1)*(full?1.2:1);
+    grd.addColorStop(0,'rgba(125,211,252,'+al+')'); grd.addColorStop(1,'rgba(129,140,248,'+al+')');
+    x.strokeStyle=grd; x.lineWidth=(on&&G.sel?1.5:0.8)*(full?1.2:1);
     x.beginPath(); x.moveTo(a.sx,a.sy); x.lineTo(b.sx,b.sy); x.stroke();
-    if(on){ e.p=(e.p+0.005)%1; const px=a.sx+(b.sx-a.sx)*e.p, py=a.sy+(b.sy-a.sy)*e.p;
-      x.fillStyle='rgba(190,215,255,.95)'; x.beginPath(); x.arc(px,py,full?2.4:1.8,0,6.2832); x.fill(); }
-    if((full||G.sel) && on){ x.globalCompositeOperation='source-over';
-      x.fillStyle='rgba(160,176,255,.75)'; x.font='10px "Segoe UI", sans-serif'; x.textAlign='center';
+    if(G.sel && (a.id===G.sel || b.id===G.sel)){       // moving dot ONLY on the selected node's edges
+      const pp=(G.t*0.01)%1, px=a.sx+(b.sx-a.sx)*pp, py=a.sy+(b.sy-a.sy)*pp;
+      x.fillStyle='rgba(190,215,255,.9)'; x.beginPath(); x.arc(px,py,full?2.0:1.5,0,6.2832); x.fill(); }
+    // Relation text ("contains", "part of"…) is hidden by default — shown only for
+    // the edges of the selected or hovered node, to keep the graph clean.
+    const showRel=(G.sel&&(a.id===G.sel||b.id===G.sel))||(G.hoverId&&(a.id===G.hoverId||b.id===G.hoverId));
+    if(showRel){ x.globalCompositeOperation='source-over';
+      x.fillStyle='rgba(200,200,210,.95)'; x.font='10px "JetBrains Mono", monospace'; x.textAlign='center';
       x.fillText(e.rel,(a.sx+b.sx)/2,(a.sy+b.sy)/2-3); x.globalCompositeOperation='lighter'; } }
-  // Nodes, drawn back-to-front. Haloes first (additive), then crisp cores.
+  // Nodes — crisp solid dots like the orb, with only a faint glow (not a big halo).
   const order=[...G.nodes].sort((p,q)=>p.depth-q.depth);
   for(const n of order){ const dim=G.sel && !neigh.has(n.id);
+    if(dim) continue;                                  // dim nodes get no glow
     const pulse=0.6+0.4*Math.sin(G.t*0.05+n.ph);
-    const a=(dim?0.1:0.85)*pulse*n.born;
-    const col=(n.id===G.sel)?'255,150,90':(n.color?n.color.join(','):'150,120,255');
-    const halo=x.createRadialGradient(n.sx,n.sy,0,n.sx,n.sy,n.r*3.4);
+    const a=0.18*pulse*n.born;                          // subtle, was 0.85
+    const col=n.color.join(',');
+    const R=n.r*1.6;                                    // tight, was 3.4
+    const halo=x.createRadialGradient(n.sx,n.sy,0,n.sx,n.sy,R);
     halo.addColorStop(0,'rgba('+col+','+a+')'); halo.addColorStop(1,'rgba('+col+',0)');
-    x.fillStyle=halo; x.beginPath(); x.arc(n.sx,n.sy,n.r*3.4,0,6.2832); x.fill(); }
+    x.fillStyle=halo; x.beginPath(); x.arc(n.sx,n.sy,R,0,6.2832); x.fill(); }
   x.globalCompositeOperation='source-over';
   for(const n of order){ const dim=G.sel && !neigh.has(n.id);
-    const rr=n.r*(n.id===G.sel?1.5:1);
-    x.fillStyle=(n.id===G.sel)?'rgba(255,214,176,'+n.born+')':'rgba(232,236,255,'+(dim?0.22:1)*n.born+')';
+    const sel=(n.id===G.sel), rr=n.r*(sel?1.6:1), col=n.color.join(',');
+    x.fillStyle='rgba('+col+','+(dim?0.22:1)*n.born+')';
     x.beginPath(); x.arc(n.sx,n.sy,rr,0,6.2832); x.fill();
-    const showLab=(full || !G.sel || neigh.has(n.id)) && !dim;
-    if(showLab){ x.fillStyle='rgba(223,227,255,'+n.born+')'; x.font=(full?'12px':'10px')+' "Segoe UI", sans-serif'; x.textAlign='center';
+    if(sel){ x.strokeStyle='rgba(255,255,255,'+n.born+')'; x.lineWidth=1.4; x.stroke(); }
+    // Labels: only hubs (>2 connections) by default; the rest on hover; plus the
+    // selected node and its neighbours.
+    const showLab = !dim && (n.deg>2 || n.id===G.hoverId || sel || (G.sel && neigh && neigh.has(n.id)));
+    if(showLab){ x.fillStyle='rgba(212,212,216,'+n.born+')'; x.font=(full?'12px':'10px')+' "JetBrains Mono", monospace'; x.textAlign='center';
       const lab=n.id.length>(full?30:16)?n.id.slice(0,(full?29:15))+'…':n.id;
       x.fillText(lab, n.sx, n.sy-rr-5); } }
 }
@@ -701,25 +900,55 @@ function stopGraphAnim(){ G.run=false; if(G.raf) cancelAnimationFrame(G.raf); G.
 // Interaction: drag to rotate, wheel to zoom, click a node to focus.
 const gcvEl=$('graphCv');
 let gDrag=false, gMoved=false, gLX=0, gLY=0, gSpinTO=null;
-gcvEl.addEventListener('pointerdown', e=>{ gDrag=true; gMoved=false; G.spin=false; gLX=e.clientX; gLY=e.clientY; });
-addEventListener('pointermove', e=>{ if(!gDrag)return; const dx=e.clientX-gLX, dy=e.clientY-gLY;
+function nodeAt(clientX, clientY){
+  const rect=gcvEl.getBoundingClientRect(), mx=clientX-rect.left, my=clientY-rect.top;
+  let best=null, bd=1e9;
+  for(const n of G.nodes){ if(n.sx==null)continue; const d=Math.hypot(n.sx-mx, n.sy-my);
+    if(d<Math.max(14, n.r+8) && d<bd){ bd=d; best=n; } }
+  return best;
+}
+function dragNodeTo(clientX, clientY){ const n=G.dragNode; if(!n) return;
+  const rect=gcvEl.getBoundingClientRect(), mx=clientX-rect.left, my=clientY-rect.top;
+  const W=rect.width, H=rect.height, cx=W/2, cy=H/2, scale=Math.min(W,H)*0.34*G.zoom, persp=n.persp||1;
+  n.x=((mx-G.panX)-cx)/(persp*scale); n.y=(cy-(my-G.panY))/(persp*scale);
+  n.vx=n.vy=n.vz=0; G.hot=1;                    // pinned to the cursor; neighbours follow via springs
+}
+gcvEl.addEventListener('pointerdown', e=>{
+  // Middle mouse → free-pan the whole view (drag to move around the graph).
+  if(e.button===1){ e.preventDefault(); G.panDrag=true; G.userPan=true; clearSel();
+    gLX=e.clientX; gLY=e.clientY; try{ gcvEl.setPointerCapture(e.pointerId); }catch(_){} return; }
+  gDrag=true; gMoved=false; G.spin=false;
+  gLX=e.clientX; gLY=e.clientY; G.dragNode = G.flat ? nodeAt(e.clientX, e.clientY) : null;
+  try{ gcvEl.setPointerCapture(e.pointerId); }catch(_){} });
+gcvEl.addEventListener('auxclick', e=>{ if(e.button===1) e.preventDefault(); });   // suppress middle-click autoscroll
+addEventListener('pointermove', e=>{
+  if(G.panDrag){ G.panX+=e.clientX-gLX; G.panY+=e.clientY-gLY; gLX=e.clientX; gLY=e.clientY; return; }
+  if(!gDrag)return; const dx=e.clientX-gLX, dy=e.clientY-gLY;
   if(Math.abs(dx)+Math.abs(dy)>3) gMoved=true;
-  G.rotY+=dx*0.008; G.rotX=Math.max(-1.45,Math.min(1.45,G.rotX+dy*0.008)); gLX=e.clientX; gLY=e.clientY; });
-addEventListener('pointerup', e=>{ if(!gDrag)return; gDrag=false;
-  if(!gMoved) pickAt(e.clientX, e.clientY);
+  if(G.dragNode){ dragNodeTo(e.clientX, e.clientY); }
+  else if(!G.flat){ G.rotY+=dx*0.008; G.rotX=Math.max(-1.45,Math.min(1.45,G.rotX+dy*0.008)); }
+  gLX=e.clientX; gLY=e.clientY; });
+addEventListener('pointerup', e=>{
+  if(G.panDrag){ G.panDrag=false; return; }
+  if(!gDrag)return; gDrag=false;
+  if(G.dragNode){ if(!gMoved) selectNode(G.dragNode.id); G.dragNode=null; }
+  else if(!gMoved){ const n=nodeAt(e.clientX, e.clientY); if(n) selectNode(n.id); else clearSel(); }
   clearTimeout(gSpinTO); gSpinTO=setTimeout(()=>{ G.spin=true; }, 2500); });
 gcvEl.addEventListener('wheel', e=>{ e.preventDefault();
-  G.zoom=Math.max(0.5,Math.min(3.2,G.zoom*(1-e.deltaY*0.0012))); }, {passive:false});
+  G.zoom=Math.max(0.12,Math.min(4,G.zoom*(1-e.deltaY*0.0012))); }, {passive:false});  // allow zooming far out
+// Hover → reveal the label of low-degree nodes (and a pointer cursor).
+gcvEl.addEventListener('pointermove', e=>{ if(gDrag) return;
+  const rect=gcvEl.getBoundingClientRect(), mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  let best=null, bd=1e9; for(const n of G.nodes){ if(n.sx==null)continue; const d=Math.hypot(n.sx-mx,n.sy-my);
+    if(d<Math.max(12,n.r+6) && d<bd){ bd=d; best=n; } }
+  G.hoverId=best?best.id:null;
+  gcvEl.style.cursor=best?'pointer':(G.flat?'default':'grab'); });
+gcvEl.addEventListener('pointerleave', ()=>{ G.hoverId=null; });
 
-function pickAt(clientX, clientY){
-  const rect=gcvEl.getBoundingClientRect(), mx=clientX-rect.left, my=clientY-rect.top;
-  let best=null, bestD=1e9;
-  for(const n of G.nodes){ if(n.sx==null)continue; const d=Math.hypot(n.sx-mx, n.sy-my);
-    if(d<Math.max(15, n.r+7) && d<bestD){ bestD=d; best=n; } }
-  if(best) selectNode(best.id); else clearSel();
-}
-function selectNode(id){ G.sel=id; G.focus=true; renderDetail(); }
+function selectNode(id){ G.sel=id; G.focus=true; G.userPan=false; renderDetail(); }  // re-enable centre-on-select
 function clearSel(){ G.sel=null; renderDetail(); }
+// Esc: deselect AND recentre (cancels any free-pan).
+addEventListener('keydown', e=>{ if(e.key==='Escape'){ G.userPan=false; clearSel(); } });
 
 // Find a node by name: exact → substring → name contained in a phrase.
 function findNode(q){ q=(q||'').toLowerCase().trim(); if(!q||!G.nodes.length) return null;
@@ -772,9 +1001,28 @@ function renderDetail(){
     '<span class="dbtn" data-act="rename">✎ Rename</span>'+
     '<span class="dbtn" data-act="addlink">＋ Link</span>'+
     '<span class="dbtn danger" data-act="delete">🗑 Delete</span></div>'+
-    '<div class="detail-form"></div>';
+    '<div class="detail-color"><span class="dlabel">Colour</span>'+
+    '<input type="color" class="dcolor" value="'+rgbToHex(nodeColor(G.sel))+'"/>'+
+    '<span class="dbtn dcreset">Reset</span></div>'+
+    '<div class="detail-form"></div>'+
+    '<div class="detail-media"></div>';
   dEl.innerHTML=html; oEl.innerHTML=html; oEl.classList.add('show');
   wireDetail(dEl); wireDetail(oEl);
+  loadNodeMedia(G.sel);
+}
+
+// Fetch the documents a node came from + their images, and render them.
+async function loadNodeMedia(name){
+  if(!api()||!api().get_node) return;
+  let r; try{ r=await api().get_node(name); }catch(e){ return; }
+  if(!r || G.sel!==name) return;
+  const docs=r.docs||[], imgs=r.images||[];
+  let frag='';
+  if(docs.length) frag+='<div class="detail-docs">From '+docs.map(d=>'<span class="chip">'+esc(d)+'</span>').join(' ')+'</div>';
+  if(imgs.length) frag+='<div class="detail-imgs">'+imgs.map(im=>
+    '<img src="'+im.src+'" title="'+escAttr(im.doc||'')+'" onclick="window.open(this.src)"/>').join('')+'</div>';
+  ['kgDetail','kgOverlay'].forEach(id=>{ const el=$(id); if(!el||G.sel!==name) return;
+    const holder=el.querySelector('.detail-media'); if(holder) holder.innerHTML=frag; });
 }
 
 function escAttr(s){ return esc(s).replace(/"/g,'&quot;'); }
@@ -782,6 +1030,17 @@ function escAttr(s){ return esc(s).replace(/"/g,'&quot;'); }
 // Wire the edit buttons (rename / add link / delete) inside a detail container.
 function wireDetail(el){
   const clr=el.querySelector('.detail-clear'); if(clr) clr.onclick=clearSel;
+  // Node colour picker — live + persisted.
+  const cin=el.querySelector('.dcolor');
+  if(cin) cin.oninput=()=>{ const hex=cin.value, id=G.sel; G.colors[canon(id)]=hex;
+    const nn=G.byId[id]; if(nn) nn.color=hexToRgb(hex)||DEFAULT_NODE_RGB.slice();
+    document.querySelectorAll('.dcolor').forEach(i=>{ if(i!==cin) i.value=hex; });
+    if(api()) api().graph_set_color(id, hex); };
+  const crs=el.querySelector('.dcreset');
+  if(crs) crs.onclick=()=>{ const id=G.sel; delete G.colors[canon(id)];
+    const nn=G.byId[id]; if(nn) nn.color=DEFAULT_NODE_RGB.slice();
+    const hx=rgbToHex(DEFAULT_NODE_RGB); document.querySelectorAll('.dcolor').forEach(i=>i.value=hx);
+    if(api()) api().graph_set_color(id, ''); };
   const form=el.querySelector('.detail-form');
   const showForm=(inner, onsave)=>{ if(!form) return; form.innerHTML=inner;
     const s=form.querySelector('.dsave'); if(s) s.onclick=onsave;
@@ -806,6 +1065,7 @@ function wireDetail(el){
 
 async function loadGraph(){ if(!api())return;
   const r=await api().get_graph(), tr=(r&&r.triples)||[];
+  G.colors=(r&&r.colors)||{};                 // custom node colours (persisted)
   build3D(tr); startGraphAnim(); renderDetail();
   $('kgMeta').innerHTML='<b>'+tr.length+'</b> relationships · <b>'+
     new Set(tr.flatMap(t=>[t.s,t.o])).size+'</b> entities · <span style="opacity:.6">drag · scroll · click a node</span>';

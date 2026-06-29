@@ -166,17 +166,34 @@ def ingest(llm=None):
                 files.append(os.path.join(dp, fn))
 
     # Read each file once: keep the full text (for graph extraction) and chunk it.
-    pieces = []   # (text, source)
-    docs = []     # (source, full_text)
+    pieces = []      # (text, source)
+    docs = []        # (source, full_text)
+    doc_paths = []   # (source, abs_path) — for pulling out images
     for path in files:
         rel = os.path.relpath(path, config.KNOWLEDGE_DIR)
         full = _read_file(path)
         docs.append((rel, full))
+        doc_paths.append((rel, path))
         for piece in _chunk(full):
             pieces.append((piece, rel))
 
+    # Pull images out of the documents (PDF figures, image files) and map them to
+    # their source doc, so clicking a graph node can show the document's pictures.
+    try:
+        from . import media
+        media.index_documents(doc_paths)
+    except Exception as e:
+        print(f"[rag] image extraction skipped: {e}")
+
     # Build the knowledge graph from the documents (LLM extraction).
     triples = _build_graph(docs, llm)
+
+    # Also fold in project READMEs and notes under their top-level graph nodes.
+    try:
+        from . import graph
+        triples += graph.index_projects() + graph.index_notes()
+    except Exception as e:
+        print(f"[rag] project/note indexing skipped: {e}")
 
     # Preferred path: a real vector database (ChromaDB) with Ollama embeddings.
     if pieces and _use_chroma():

@@ -103,6 +103,14 @@ def tools_prompt():
         "PATROAM builds the whole folder/files. Use it once the user confirms what "
         "they want; then customize by writing extra/edited files as path + code "
         "blocks. Do NOT hand-write all project files yourself.\n"
+        '- plan {"name": "...", "kind": "flutter|python|website|webapp|desktop|generic", '
+        '"description": "...", "choices": ["..."]} — PLAN & CREATE a whole project: '
+        "PATROAM generates a delivery roadmap (milestones → tasks → subtasks + a "
+        "backlog), scaffolds the folder, writes a README with the plan, records it in "
+        "the knowledge graph under Projects, and pushes the tasks to ClickUp. Emit this "
+        "ONCE, only AFTER you've consulted the user and they've confirmed the goal, "
+        "requirements and choices (use `ask` for those questions first). `choices` are "
+        "the decisions they made (e.g. \"Riverpod\", \"Postgres\").\n"
         '- relate {"subject": "...", "relation": "USES|OWNS|DEPENDS_ON|IMPLEMENTS|'
         'IS|LIKES|WORKS_ON|RELATED_TO|BLOCKED_BY", "object": "..."} — add/update a '
         "relationship in the knowledge graph (e.g. \"Trump IS handsome\", \"Orion USES "
@@ -174,6 +182,12 @@ def run(name, args):
     # Scaffold a real project of a given type (deterministic, reliable).
     if name == "scaffold":
         return files.scaffold_project(args.get("type") or args.get("kind"), args.get("name"))
+    # Plan & create a full project (roadmap + scaffold + README + graph + ClickUp).
+    if name == "plan":
+        from . import planner
+        rep = planner.create_project(args.get("name", ""), args.get("kind", ""),
+                                     args.get("description", ""), args.get("choices"))
+        return rep.get("show") if isinstance(rep, dict) else rep
     if name in _LOCAL:
         if name == "remember":
             # Remember a fact about the user, in the knowledge graph.

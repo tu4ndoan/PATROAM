@@ -25,6 +25,9 @@ MAX_TRIPLES = 1000
 # you" lives now (no separate memory.json). First-person words map onto it so
 # "I like pizza" becomes (You)-[LIKES]->(pizza).
 USER = "You"
+# Top-level container nodes (siblings of the You memory node).
+PROJECTS = "Projects"
+NOTES = "Notes"
 _FIRST_PERSON = {"i", "me", "my", "myself", "mine"}
 
 
@@ -52,6 +55,7 @@ def _load():
         except Exception:
             _CACHE = {"triples": []}
         _CACHE.setdefault("triples", [])
+        _CACHE.setdefault("colors", {})   # {canonical name: "#rrggbb"} custom node colors
     return _CACHE
 
 
@@ -308,6 +312,153 @@ def user_summary(limit=12):
         return "I don't have anything saved about you yet, Sir."
     return "Here's what I remember about you: " + "; ".join(
         _fact_phrase(t) for t in facts[-limit:]) + "."
+
+
+def set_color(name, color):
+    """Persist a custom colour (hex '#rrggbb') for a node, so it survives restarts.
+    Keyed by the canonical name so case/spacing variants share the colour."""
+    c = _canon(name)
+    if not c:
+        return False
+    g = _load()
+    if color:
+        g["colors"][c] = color
+    else:
+        g["colors"].pop(c, None)   # empty colour = reset to default
+    _save()
+    return True
+
+
+def get_colors():
+    """The custom node-colour map {canonical name: '#rrggbb'} for the visualizer."""
+    return dict(_load().get("colors", {}))
+
+
+def node_docs(name):
+    """The source documents a node came from (for showing the doc's images when
+    you click the node). Loose match on the node name."""
+    c = _canon(name)
+    out = []
+    for t in _load()["triples"]:
+        d = t.get("doc")
+        if d and d not in out and (_canon(t["s"]) == c or _canon(t["o"]) == c):
+            out.append(d)
+    return out
+
+
+# ── Projects & Notes (top-level containers) + backups ─────────────────────────────
+def link_under(parent, child, relation="HAS"):
+    """Attach `child` under a top-level container node (Projects / Notes)."""
+    return add(parent, relation, child)
+
+
+def add_project(name, description="", facts=None, doc=None):
+    """Register a project under the Projects node, with an optional description and
+    extra (relation, object) facts (e.g. choices, stack). Tagged to `doc`."""
+    name = _norm(name)
+    if not name:
+        return False
+    add(PROJECTS, "HAS_PROJECT", name, doc=doc)
+    if description:
+        add(name, "DESCRIBED_AS", description.strip()[:200], confidence=0.9, doc=doc)
+    for rel, obj in (facts or []):
+        add(name, rel, obj, doc=doc)
+    return True
+
+
+def add_note_entry(title, text="", facts=None, doc=None):
+    """Register a note under the Notes node (title + free text + optional facts)."""
+    title = _norm(title)
+    if not title:
+        return False
+    add(NOTES, "HAS_NOTE", title, doc=doc)
+    if text:
+        add(title, "NOTE", text.strip()[:500], doc=doc)
+    for rel, obj in (facts or []):
+        add(title, rel, obj, doc=doc)
+    return True
+
+
+def projects():
+    """Names of projects registered under the Projects node."""
+    p = PROJECTS.lower()
+    return [t["o"] for t in _load()["triples"]
+            if t["s"].lower() == p and t["r"] == "HAS_PROJECT"]
+
+
+def backup():
+    """Write a timestamped copy of the graph to BACKUP_DIR and prune old ones.
+    Returns the backup path, or None on failure."""
+    import datetime
+    import shutil
+    _save()                                   # flush current state to disk first
+    try:
+        os.makedirs(config.BACKUP_DIR, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        dst = os.path.join(config.BACKUP_DIR, f"graph-{ts}.json")
+        shutil.copy2(config.GRAPH_FILE, dst)
+    except Exception:
+        return None
+    _prune_backups()
+    return dst
+
+
+def _prune_backups(keep=None):
+    import glob
+    keep = keep or config.BACKUP_KEEP
+    files = sorted(glob.glob(os.path.join(config.BACKUP_DIR, "graph-*.json")))
+    for f in files[:-keep] if keep > 0 else []:
+        try:
+            os.remove(f)
+        except Exception:
+            pass
+
+
+def _read_text(path):
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
+def index_projects():
+    """Scan the workspace for <project>/README.md, link each under Projects, and
+    LLM-extract its facts. Returns triples added. Safe/idempotent."""
+    from . import llm
+    fn = llm.complete if llm.available() else None
+    ws = config.WORKSPACE_DIR
+    if not os.path.isdir(ws):
+        return 0
+    added = 0
+    for name in os.listdir(ws):
+        rd = os.path.join(ws, name, "README.md")
+        if not os.path.isfile(rd):
+            continue
+        link_under(PROJECTS, name, "HAS_PROJECT")
+        txt = _read_text(rd)
+        if fn and txt.strip():
+            added += extract_into(txt, fn, doc=name)
+    return added
+
+
+def index_notes():
+    """Link each file in NOTES_DIR under Notes and LLM-extract its facts."""
+    from . import llm
+    fn = llm.complete if llm.available() else None
+    nd = config.NOTES_DIR
+    if not os.path.isdir(nd):
+        return 0
+    added = 0
+    for f in os.listdir(nd):
+        if os.path.splitext(f)[1].lower() not in (".md", ".txt"):
+            continue
+        title = os.path.splitext(f)[0]
+        txt = _read_text(os.path.join(nd, f))
+        add_note_entry(title, txt, doc=title)
+        if fn and txt.strip():
+            added += extract_into(txt, fn, doc=title)
+    return added
 
 
 def all_triples():

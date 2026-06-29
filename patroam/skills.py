@@ -8,6 +8,7 @@ if it handled the request, or None to let the model answer normally.
 This is the seed of PATROAM's command-execution pillar; add more skills here.
 """
 
+import json
 import os
 import random
 import re
@@ -17,6 +18,8 @@ import sys
 import threading
 import time
 import webbrowser
+
+from . import config
 
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
@@ -47,6 +50,82 @@ ADS_CTX_RE = re.compile(r"\b(doing|stats|statistics|performance|results?|spend|s
 
 # News command ("what's up", "what's new", "news", "headlines", …).
 NEWS_RE = re.compile(r"\b(what'?s up|what'?s new|what is up|news|headlines|catch me up)\b", re.I)
+
+
+def graph_view_mode(text):
+    """Detect a 'change the knowledge-graph view' command → 'flat' | 'sphere' |
+    'toggle', or None. e.g. 'make the graph flat', 'change the graph visual'."""
+    t = (text or "").lower()
+    if not re.search(r"\bgraph\b|knowledge graph|\bkg\b", t):
+        return None
+    if re.search(r"\b(flat|2d|plane|planar|static|stop spin\w*|don'?t spin|no spin)\b", t):
+        return "flat"
+    if re.search(r"\b(3d|sphere|spherical|spin\w*|orb|globe|rotat\w*)\b", t):
+        return "sphere"
+    if re.search(r"\b(change|switch|toggle|flip|different)\b", t):
+        return "toggle"
+    return None
+
+# Fab sales → open the Fab analytics page in Brave.
+FAB_RE = re.compile(r"\bfab\s+(?:sales|report|analytics|portal|store|earnings|revenue)\b"
+                    r"|\bfab sales\b|fab\.com|\bmy fab\b", re.I)
+# Gold price (USD + VND), incl. Vietnamese "giá vàng".
+GOLD_RE = re.compile(r"\bgold\b[^?\n]{0,15}\b(price|rate|cost|spot|worth|value|usd|vnd)\b"
+                     r"|\b(price|rate|cost)\b[^?\n]{0,15}\bgold\b|\bgi[aá]\s*v[aà]ng\b", re.I)
+
+# Vietnamese stocks (SSI): "stock/share price", "ticker", "VN-Index", "cổ phiếu".
+STOCK_RE = re.compile(
+    r"\b(stocks?|shares?|ticker|equit\w*|trading\s+at|share\s+price|vn[\- ]?index|"
+    r"vnindex|hnx[\- ]?index|upcom|vn30|c[oổ]\s*phi[eế]u|ch[uứ]ng kho[aá]n|"
+    r"gi[aá]\s+c[oổ])\b", re.I)
+_VNINDEX_RE = re.compile(r"vn[\- ]?index|vnindex", re.I)
+_HNXINDEX_RE = re.compile(r"hnx[\- ]?index", re.I)
+_VN30_RE = re.compile(r"\bvn[\- ]?30\b", re.I)
+# Words that look like 3-letter tickers but aren't.
+_NOT_TICKER = {"THE", "AND", "FAB", "USD", "VND", "WHO", "WHY", "HOW", "ARE", "YOU",
+               "VND", "API", "SSI", "NOW", "GET", "FOR", "OUT", "NEW"}
+
+
+def stock_symbol(text):
+    """Pull a stock ticker (or index code) out of a request, or None."""
+    if _VNINDEX_RE.search(text):
+        return "VNINDEX"
+    if _HNXINDEX_RE.search(text):
+        return "HNXINDEX"
+    if _VN30_RE.search(text):
+        return "VN30"
+    # "stock/share/ticker/cổ phiếu/mã VNM"
+    m = re.search(r"(?:stock|share|ticker|c[oổ]\s*phi[eế]u|m[aã]|of|for)\s+"
+                  r"(?:price\s+|of\s+|for\s+)?([A-Za-z]{3})\b", text, re.I)
+    if m and m.group(1).upper() not in _NOT_TICKER:
+        return m.group(1).upper()
+    # A standalone 3-letter UPPERCASE token (most HOSE/HNX tickers).
+    m = re.search(r"\b([A-Z]{3})\b", text)
+    if m and m.group(1).upper() not in _NOT_TICKER:
+        return m.group(1).upper()
+    return None
+
+
+def open_url_in_brave(url):
+    """Open `url` in Brave specifically; fall back to the default browser."""
+    paths = [
+        os.path.join(os.environ.get("ProgramFiles", ""), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", ""), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+    ]
+    exe = next((p for p in paths if p and os.path.exists(p)), None) or shutil.which("brave") or shutil.which("brave-browser")
+    try:
+        if exe:
+            subprocess.Popen([exe, url])
+        else:
+            webbrowser.open(url)
+        return True
+    except Exception:
+        try:
+            webbrowser.open(url)
+            return True
+        except Exception:
+            return False
 
 # Switch reply language ("reply in Vietnamese", "trả lời bằng tiếng Việt", …).
 LANG_RE = re.compile(
@@ -482,18 +561,206 @@ def try_handle(text):
     return r if r is not None else command_handle(text)
 
 
-def data_handle(text):
-    """Things that FETCH live data — run before the model (it can't be trusted to
-    actually fetch, and we don't want it talking over the result). News, ads."""
-    # Ad stats (direct Meta API — reliable on any model).
+# ── live-data skills (each returns the exact {say, show} to speak/show) ────────────
+def _need_ssi():
+    return ("Add your SSI FastConnect credentials first, Sir — put "
+            "SSI_CONSUMER_ID and SSI_CONSUMER_SECRET in secrets.json.")
+
+
+def _fab():
+    """Fab sales → fresh CSV via Brave (past Cloudflare), then read it."""
+    from . import fab
+    rep = fab.download_and_read()
+    if rep:
+        return rep
+    open_url_in_brave(config.FAB_SALES_URL)
+    return ("I opened your Fab sales in Brave, Sir — once the CSV downloads, "
+            "ask me again and I'll read you the numbers.")
+
+
+def _stock(text, symbol=None):
+    from . import stocks
+    if not stocks.available():
+        return _need_ssi()
+    sym = (symbol or "").upper().strip() or stock_symbol(text)
+    if sym in ("VNINDEX", "HNXINDEX", "VN30"):
+        return stocks.index(sym)
+    if sym:
+        return stocks.quote(sym)
+    return "Which stock would you like, Sir? Tell me the ticker — for example, VNM."
+
+
+def _index(name=None):
+    from . import stocks
+    if not stocks.available():
+        return _need_ssi()
+    return stocks.index((name or "VNINDEX").upper().strip())
+
+
+def _briefing(text):
+    """"What's up" → gold + VN-Index + Fab sales + top headlines."""
+    from . import gold, news, fab, stocks
+    g = gold.price(text)
+    idx = stocks.index("VNINDEX") if stocks.available() else None
+    idx_say = idx["say"] if isinstance(idx, dict) else ""
+    idx_show = idx["show"] if isinstance(idx, dict) else ""
+    rep = fab.report()
+    n = news.latest(text, 3)
+    n_say, n_show = (n.get("say", ""), n.get("show", "")) if isinstance(n, dict) else (n, n)
+    if rep:
+        fab_say, fab_show = rep["say"], rep["show"]
+    else:
+        open_url_in_brave(config.FAB_SALES_URL)
+        fab_say = "I've opened your Fab sales in Brave to download the latest report."
+        fab_show = f"🔗 Fab sales: {config.FAB_SALES_URL}"
+    say = f"{g} {idx_say} {fab_say} {n_say}".strip()
+    show = "\n\n".join(x for x in [g, idx_show, fab_show, n_show] if x)
+    return {"say": say, "show": show}
+
+
+# ── LLM intent router (understand the request in any wording) ──────────────────────
+_ROUTER_PROMPT = (
+    "You are PATROAM's intent router. Decide which skill (if any) handles the "
+    "user's message, and extract its parameters. Reply with ONLY a JSON object.\n\n"
+    "Skills:\n"
+    '- "stock": a Vietnamese stock/share price. Add {"symbol":"TICKER"} '
+    "(3-letter HOSE/HNX ticker, uppercase).\n"
+    '- "index": a market index value. Add {"name":"VNINDEX"|"HNXINDEX"|"VN30"}.\n'
+    '- "gold": the current price of gold.\n'
+    '- "fab": the user\'s Fab.com store sales/revenue.\n'
+    '- "ads": the user\'s Meta/Facebook ad performance. Add {"query":"..."}.\n'
+    '- "news": latest news/headlines. Add {"topic":"..."} (empty for general).\n'
+    '- "briefing": a general "what\'s up / catch me up" overview.\n'
+    '- "new_note": take/write/save a note. Add {"text":"..."} if they dictated the '
+    "note content, otherwise omit it.\n"
+    '- "project_status": asking about project progress, where they left off, what '
+    "to do next, or whether they're on schedule.\n"
+    '- "note_suggestions": asking what their notes say, or for suggestions / '
+    "conflicts from their notes.\n"
+    '- "backup_graph": back up / save a copy of the knowledge graph.\n'
+    '- "none": anything else — general chat, coding, BUILDING apps/projects, '
+    "questions.\n\n"
+    'Examples: "how is FPT doing today" -> {"skill":"stock","symbol":"FPT"}; '
+    '"giá vàng" -> {"skill":"gold"}; "any war news" -> {"skill":"news","topic":"war"}; '
+    '"how were my sales on fab" -> {"skill":"fab"}; '
+    '"take a note: buy milk" -> {"skill":"new_note","text":"buy milk"}; '
+    '"where did I leave off" -> {"skill":"project_status"}; '
+    '"back up my knowledge graph" -> {"skill":"backup_graph"}; '
+    '"what should I work on from my notes" -> {"skill":"note_suggestions"}; '
+    '"build me a flutter app" -> {"skill":"none"}; '
+    '"what stock API should I use" -> {"skill":"none"}.\n\n'
+    "User message: "
+)
+
+
+def _route_intent(text):
+    """Ask the active model to classify the request. Returns an intent dict, or
+    None if no model is available (→ caller uses the regex backstop)."""
+    from . import llm
+    if not llm.available():
+        return None
+    raw = llm.complete(_ROUTER_PROMPT + json.dumps(text), timeout=8)
+    if not raw:
+        return None
+    try:
+        i, j = raw.find("{"), raw.rfind("}")
+        data = json.loads(raw[i:j + 1]) if i >= 0 and j > i else {}
+    except Exception:
+        return None
+    return data if isinstance(data, dict) and data.get("skill") else None
+
+
+def _dispatch(intent, text):
+    skill = intent.get("skill")
+    if skill == "stock":
+        return _stock(text, intent.get("symbol"))
+    if skill == "index":
+        return _index(intent.get("name"))
+    if skill == "gold":
+        from . import gold
+        return gold.price(text)
+    if skill == "fab":
+        return _fab()
+    if skill == "ads":
+        from . import meta_ads
+        return meta_ads.summary(intent.get("query") or text)
+    if skill == "news":
+        from . import news
+        return news.latest(intent.get("topic") or "", config.NEWS_MAX)
+    if skill == "briefing":
+        return _briefing(text)
+    # New skills (full implementations land in later phases — stubs prove routing).
+    if skill == "new_note":
+        return _new_note(intent.get("text") or "")
+    if skill == "project_status":
+        return _project_status()
+    if skill == "note_suggestions":
+        return _note_suggestions()
+    if skill == "backup_graph":
+        return _backup_graph()
+    return None   # "none" or unknown → not a data request
+
+
+# ── Planner / Notes / backup skills (Phase 1 stubs; filled in later phases) ─────────
+def _new_note(text):
+    return ("I'll open a note window for you, Sir — note-taking is coming in the "
+            "next update." + (f' (You said: "{text}")' if text else ""))
+
+
+def _project_status():
+    from . import planner
+    return planner.project_status()
+
+
+def _note_suggestions():
+    return ("Your notes assistant isn't set up yet, Sir — coming soon. It will read "
+            "your notes and surface suggestions and schedule conflicts.")
+
+
+def _backup_graph():
+    from . import graph
+    path = graph.backup()
+    if path:
+        return {"say": "I've backed up your knowledge graph, Sir.",
+                "show": "💾 Knowledge graph backed up to:\n" + path}
+    return "I couldn't back up the knowledge graph, Sir."
+
+
+def _regex_data_handle(text):
+    """Deterministic keyword routing — the offline / fallback path used when the
+    model is unavailable or didn't recognise a clear data command."""
+    if FAB_RE.search(text):
+        return _fab()
+    if GOLD_RE.search(text):
+        from . import gold
+        return gold.price(text)
+    if STOCK_RE.search(text):
+        sym = stock_symbol(text)
+        price_intent = bool(re.search(
+            r"price|trading|quote|worth|value|index|gi[aá]|bao nhi[eê]u", text, re.I))
+        if sym or price_intent:
+            return _stock(text, sym)
     if ADS_RE.search(text) and ADS_CTX_RE.search(text):
         from . import meta_ads
         return meta_ads.summary(text)
-    # Latest news from your trusted feeds (speaks titles, shows clickable links).
     if NEWS_RE.search(text):
-        from . import news
-        return news.latest(text)
+        return _briefing(text)
     return None
+
+
+def data_handle(text):
+    """Route a request to a live-data skill. The MODEL decides the intent and
+    parameters (so any wording works); the skill then produces the exact answer
+    (precise numbers, clickable links — no model drift). Regex matching is kept
+    only as an offline backstop when the model is unavailable or unsure."""
+    intent = _route_intent(text)
+    if intent:
+        rep = _dispatch(intent, text)
+        if rep is not None:
+            return rep
+        if intent.get("skill") == "none":
+            return None        # the model is confident this isn't live data
+    return _regex_data_handle(text)
 
 
 def command_handle(text):
