@@ -18,6 +18,18 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "../tu4ndoan", "run", "dev"],
       "port": 3000
+    },
+    {
+      "name": "hanabie",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "../hanabie", "run", "dev", "--", "-p", "3100"],
+      "port": 3100
+    },
+    {
+      "name": "proto",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8790", "--directory", "C:/Users/RAZER/AppData/Local/Temp/claude/C--Users-RAZER-Documents-GitHub-PATROAM/f26060ae-4ad2-487b-a9d8-c6243cd56eaf/scratchpad"],
+      "port": 8790
     }
   ]
 }

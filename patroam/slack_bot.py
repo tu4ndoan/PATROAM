@@ -42,6 +42,43 @@ def _reply_to(text):
         return f"Sorry, Sir — I hit an error: {e}"
 
 
+def create_devlog_channel(project_name, intro=""):
+    """Create a PRIVATE #devlog-<project> channel, invite the user, post an intro.
+    Returns {id, name} or None. Needs bot scopes groups:write (+ groups:read)."""
+    if _client is None:
+        return None
+    import re
+    ch = "devlog-" + re.sub(r"[^a-z0-9]+", "-", (project_name or "project").lower()).strip("-")
+    ch = ch[:79]
+    try:
+        res = _client.conversations_create(name=ch, is_private=True)
+        cid = res["channel"]["id"]
+    except Exception:
+        return None
+    if config.SLACK_USER_ID:
+        try:
+            _client.conversations_invite(channel=cid, users=config.SLACK_USER_ID)
+        except Exception:
+            pass
+    if intro:
+        try:
+            _client.chat_postMessage(channel=cid, text=intro)
+        except Exception:
+            pass
+    return {"id": cid, "name": ch}
+
+
+def post(channel_id, text):
+    """Post a message to a channel (e.g. a dev-log issue). Best-effort."""
+    if _client is None or not channel_id:
+        return False
+    try:
+        _client.chat_postMessage(channel=channel_id, text=text)
+        return True
+    except Exception:
+        return False
+
+
 def _notify(payload):
     """Push a proactive message (news, etc.) to your Slack DM/channel."""
     ch = config.SLACK_DM_CHANNEL

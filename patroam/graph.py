@@ -46,24 +46,65 @@ def _canon(name):
     return re.sub(r"[\s_\-]+", " ", (name or "").lower()).strip()
 
 
+# True once the store was READ successfully (or confirmed absent). While False —
+# e.g. the file exists but was locked/corrupt when we tried to read it — _save()
+# refuses to write, so a failed load can never wipe the real graph on disk.
+_LOAD_OK = False
+# Explicit permission to write an empty store (only clear() sets this) — guards
+# against any other path accidentally flushing an empty cache over real data.
+_ALLOW_EMPTY_WRITE = False
+
+
 def _load():
-    global _CACHE
+    global _CACHE, _LOAD_OK
     if _CACHE is None:
-        try:
-            with open(config.GRAPH_FILE, encoding="utf-8") as f:
-                _CACHE = json.load(f)
-        except Exception:
-            _CACHE = {"triples": []}
+        data = None
+        if os.path.exists(config.GRAPH_FILE):
+            # Retry a few times: on Windows another PATROAM process shutting down
+            # can hold the file for a moment (sharing violation).
+            for _ in range(4):
+                try:
+                    with open(config.GRAPH_FILE, encoding="utf-8") as f:
+                        data = json.load(f)
+                    _LOAD_OK = True
+                    break
+                except Exception:
+                    time.sleep(0.15)
+            if data is None:
+                # File exists but can't be read → work from an empty cache in
+                # memory, but NEVER save over the real file (_LOAD_OK stays False).
+                _LOAD_OK = False
+                data = {"triples": []}
+        else:
+            _LOAD_OK = True                # genuinely new store — writing is fine
+            data = {"triples": []}
+        _CACHE = data
         _CACHE.setdefault("triples", [])
         _CACHE.setdefault("colors", {})   # {canonical name: "#rrggbb"} custom node colors
+        _CACHE.setdefault("layout", {})   # {canonical name: {x,y,z,pinned}} saved node positions
     return _CACHE
 
 
 def _save():
+    if not _LOAD_OK:
+        return                             # never overwrite a store we failed to read
     try:
+        data = _load()
+        # Catastrophic-shrink guard: an EMPTY cache never overwrites a real store
+        # unless clear() explicitly allowed it.
+        if not data.get("triples") and not _ALLOW_EMPTY_WRITE:
+            try:
+                if (os.path.exists(config.GRAPH_FILE)
+                        and os.path.getsize(config.GRAPH_FILE) > 200):
+                    return
+            except Exception:
+                pass
         os.makedirs(os.path.dirname(config.GRAPH_FILE), exist_ok=True)
-        with open(config.GRAPH_FILE, "w", encoding="utf-8") as f:
-            json.dump(_load(), f, ensure_ascii=False, indent=2)
+        # Atomic write (tmp + replace) so a crash mid-write can't corrupt the file.
+        tmp = config.GRAPH_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, config.GRAPH_FILE)
     except Exception:
         pass
 
@@ -122,6 +163,9 @@ def forget(entity):
     g["triples"] = [t for t in g["triples"] if e not in t["s"].lower() and e not in t["o"].lower()]
     removed = before - len(g["triples"])
     if removed:
+        # drop saved positions of nodes that no longer exist
+        live = {_canon(n) for t in g["triples"] for n in (t["s"], t["o"])}
+        g["layout"] = {k: v for k, v in g.get("layout", {}).items() if k in live}
         _save()
     return removed
 
@@ -187,6 +231,10 @@ def rename(old, new):
             changed += 1
     if changed:
         _dedupe(g)
+        # carry the saved position over to the new name
+        lay = g.get("layout", {})
+        if oc in lay:
+            lay[_canon(newname)] = lay.pop(oc)
         _save()
     return changed
 
@@ -238,6 +286,7 @@ def clear(keep_user=True):
     """Wipe the knowledge graph. By default KEEPS your personal memory (facts on
     the 'You' node) and removes everything else (e.g. garbled document facts).
     Pass keep_user=False to wipe absolutely everything. Returns count removed."""
+    global _ALLOW_EMPTY_WRITE
     g = _load()
     before = len(g["triples"])
     if keep_user:
@@ -248,7 +297,11 @@ def clear(keep_user=True):
         g["triples"] = []
     removed = before - len(g["triples"])
     if removed:
-        _save()
+        _ALLOW_EMPTY_WRITE = True          # an explicit wipe IS allowed to persist
+        try:
+            _save()
+        finally:
+            _ALLOW_EMPTY_WRITE = False
     return removed
 
 
@@ -334,6 +387,40 @@ def get_colors():
     return dict(_load().get("colors", {}))
 
 
+def get_layout():
+    """Saved node positions {canonical name: {x, y, z, pinned}} so the graph keeps
+    the layout you arranged across restarts."""
+    return dict(_load().get("layout", {}))
+
+
+def save_layout(positions):
+    """Persist node positions from the visualizer. `positions` is
+    {display name: {x, y, z, pinned}}; a value of None drops that node's saved
+    position (falls back to auto-layout). Keyed canonically. Returns True on save."""
+    if not isinstance(positions, dict):
+        return False
+    g = _load()
+    lay = g.setdefault("layout", {})
+    for name, pos in positions.items():
+        c = _canon(name)
+        if not c:
+            continue
+        if pos is None:
+            lay.pop(c, None)
+            continue
+        try:
+            lay[c] = {
+                "x": float(pos.get("x", 0.0)),
+                "y": float(pos.get("y", 0.0)),
+                "z": float(pos.get("z", 0.0)),
+                "pinned": bool(pos.get("pinned", False)),
+            }
+        except (TypeError, ValueError):
+            continue
+    _save()
+    return True
+
+
 def node_docs(name):
     """The source documents a node came from (for showing the doc's images when
     you click the node). Loose match on the node name."""
@@ -388,11 +475,19 @@ def projects():
 
 def backup():
     """Write a timestamped copy of the graph to BACKUP_DIR and prune old ones.
-    Returns the backup path, or None on failure."""
+    Returns the backup path, or None if skipped/failed.
+
+    IMPORTANT: copies the ON-DISK file as-is — no flush first. A flush here once
+    wiped the store: when the launch-time read failed (file briefly locked by the
+    previous instance), the empty in-memory cache overwrote the real graph, and
+    the backup then archived the wiped file. Also skips empty/corrupt stores so
+    a bad launch can't rotate the good backups away."""
     import datetime
     import shutil
-    _save()                                   # flush current state to disk first
     try:
+        if (not os.path.exists(config.GRAPH_FILE)
+                or os.path.getsize(config.GRAPH_FILE) < 200):
+            return None                       # nothing worth backing up
         os.makedirs(config.BACKUP_DIR, exist_ok=True)
         ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         dst = os.path.join(config.BACKUP_DIR, f"graph-{ts}.json")
@@ -442,6 +537,28 @@ def index_projects():
     return added
 
 
+def sync_projects():
+    """Make the Projects node reflect the REAL projects (git repos in the GitHub
+    root + ClickUp lists), dropping stale/dummy entries. Returns the real names."""
+    from . import manage
+    real = manage.discover_projects()
+    real_norm = {_canon(r["name"]) for r in real}
+    g = _load()
+    p = PROJECTS.lower()
+    linked = [t["o"] for t in g["triples"] if t["s"].lower() == p and t["r"] == "HAS_PROJECT"]
+    stale = {_canon(n) for n in linked if _canon(n) not in real_norm}
+    if stale:
+        # Drop stale HAS_PROJECT links AND those dummy project nodes' own facts —
+        # precise (exact canonical match), never substring, so nothing else is hit.
+        g["triples"] = [t for t in g["triples"] if not (
+            (t["s"].lower() == p and t["r"] == "HAS_PROJECT" and _canon(t["o"]) in stale)
+            or _canon(t["s"]) in stale)]
+    for r in real:
+        add(PROJECTS, "HAS_PROJECT", r["name"])
+    _save()
+    return [r["name"] for r in real]
+
+
 def index_notes():
     """Link each file in NOTES_DIR under Notes and LLM-extract its facts."""
     from . import llm
@@ -449,15 +566,17 @@ def index_notes():
     nd = config.NOTES_DIR
     if not os.path.isdir(nd):
         return 0
+    from . import notes as _notes
     added = 0
     for f in os.listdir(nd):
         if os.path.splitext(f)[1].lower() not in (".md", ".txt"):
             continue
-        title = os.path.splitext(f)[0]
         txt = _read_text(os.path.join(nd, f))
-        add_note_entry(title, txt, doc=title)
-        if fn and txt.strip():
-            added += extract_into(txt, fn, doc=title)
+        title = _notes.title_of(txt, os.path.splitext(f)[0])   # real title (keeps Vietnamese)
+        body = _notes._body(txt)
+        add_note_entry(title, body or txt, doc=title)
+        if fn and (body or txt).strip():
+            added += extract_into(body or txt, fn, doc=title)
     return added
 
 

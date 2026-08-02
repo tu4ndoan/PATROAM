@@ -180,6 +180,41 @@ def report():
     return _read_csv(path) if path else None
 
 
+def latest_totals():
+    """Numeric totals from the latest CSV: {units, sales, top}. For briefing deltas."""
+    path = latest_csv()
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            cols = {c.lower().strip(): c for c in (reader.fieldnames or [])}
+
+            def col(*names):
+                for n in names:
+                    for lc, orig in cols.items():
+                        if n in lc:
+                            return orig
+                return None
+
+            c_title = col("listing", "title", "product")
+            c_units, c_sales = col("net unit", "unit", "quantity"), col("net sale", "sales", "amount")
+            units = sales = 0.0
+            agg = {}
+            for row in reader:
+                t = (row.get(c_title) or "").strip()
+                if not t or t.lower() == "total":
+                    continue
+                u, s = _num(row.get(c_units)), _num(row.get(c_sales))
+                units += u
+                sales += s
+                agg[t] = agg.get(t, 0) + s
+    except Exception:
+        return None
+    return {"units": int(units), "sales": round(sales, 2),
+            "top": (max(agg, key=agg.get) if agg else "")}
+
+
 def _report_url():
     from datetime import date, timedelta
     end = date.today().isoformat()

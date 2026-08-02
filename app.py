@@ -30,31 +30,26 @@ def _install(pkg):
     subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
 
 
-def _bootstrap():
-    """Install voice dependencies on first run."""
-    # Required: voice I/O and the offline TTS fallback.
-    for module, pkg in [
-        ("pyaudio", "pyaudio"),
-        ("pyttsx3", "pyttsx3"),
-        ("speech_recognition", "SpeechRecognition"),
-    ]:
-        try:
-            __import__(module)
-        except ImportError:
-            print(f"Installing {pkg}…")
-            _install(pkg)
+_BOOT_MARK = os.path.join(os.path.expanduser("~"), ".patroam", ".bootstrap-ok")
 
-    # Optional: the natural neural British voice (Edge TTS + pygame playback)
-    # and the WebGL orb window (pywebview). If these can't be installed (e.g.
-    # offline), PATROAM still runs with the offline voice / classic window.
-    for module, pkg in [("edge_tts", "edge-tts"), ("pygame", "pygame"),
-                        ("webview", "pywebview"), ("anthropic", "anthropic"),
-                        ("mcp", "mcp"), ("reportlab", "reportlab"),
-                        ("fitz", "pymupdf"),   # best .pdf text extraction (Unicode)
-                        ("pypdf", "pypdf"),    # .pdf fallback reader
-                        ("PIL", "Pillow"),     # screen capture for the vision model
-                        ("playwright", "playwright"),   # (legacy) live scraping
-                        ("browser_cookie3", "browser-cookie3")]:  # silent Fab CSV download
+
+def _bootstrap():
+    """Ensure dependencies are installed — but only CHECK once. Re-importing heavy
+    packages (anthropic, edge_tts, pygame, mcp…) on every launch cost ~25s and made
+    startup hang; after a clean run we drop a marker and skip the checks entirely."""
+    if os.path.exists(_BOOT_MARK):
+        return
+    ok = True
+    # Required: voice I/O and the offline TTS fallback.
+    required = [("pyaudio", "pyaudio"), ("pyttsx3", "pyttsx3"),
+                ("speech_recognition", "SpeechRecognition")]
+    # Optional: neural voice (edge-tts+pygame), the orb window, vision, PDF, etc.
+    optional = [("edge_tts", "edge-tts"), ("pygame", "pygame"),
+                ("webview", "pywebview"), ("anthropic", "anthropic"),
+                ("mcp", "mcp"), ("reportlab", "reportlab"), ("fitz", "pymupdf"),
+                ("pypdf", "pypdf"), ("PIL", "Pillow"), ("playwright", "playwright"),
+                ("browser_cookie3", "browser-cookie3")]
+    for module, pkg in required + optional:
         try:
             __import__(module)
         except ImportError:
@@ -63,6 +58,15 @@ def _bootstrap():
                 _install(pkg)
             except Exception as e:
                 print(f"  Skipped {pkg}: {e}")
+                ok = False
+    # Mark success so subsequent launches skip the slow re-import checks. Delete
+    # ~/.patroam/.bootstrap-ok to force a re-check (e.g. after reinstalling Python).
+    if ok:
+        try:
+            os.makedirs(os.path.dirname(_BOOT_MARK), exist_ok=True)
+            open(_BOOT_MARK, "w").close()
+        except Exception:
+            pass
 
 
 _LOCK_SOCK = None

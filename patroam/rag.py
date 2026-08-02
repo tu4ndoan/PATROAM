@@ -231,6 +231,21 @@ def ingest(llm=None):
     return len(chunks), len(files), triples
 
 
+def rebuild_graph(llm=None):
+    """Re-extract the knowledge graph from the documents only (no re-embedding).
+    Used on launch when the graph is empty but documents exist. Returns triples added."""
+    ensure_dir()
+    docs = []
+    for dp, _, fns in os.walk(config.KNOWLEDGE_DIR):
+        for fn in fns:
+            if fn == "README.txt":
+                continue
+            if os.path.splitext(fn)[1].lower() in _TEXT_EXT:
+                p = os.path.join(dp, fn)
+                docs.append((os.path.relpath(p, config.KNOWLEDGE_DIR), _read_file(p)))
+    return _build_graph(docs, llm)
+
+
 def _load():
     global _CACHE
     if _CACHE is None:

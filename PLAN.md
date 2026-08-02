@@ -52,6 +52,45 @@ text agent), `slack_bot` (Socket Mode), and the desktop `Controller`.
 
 ---
 
-### Decisions needed
-- **ClickUp** (Phase 3): API token + workspace/space.
-- **Mail** (Phase 5): provider — Gmail API, IMAP, or Outlook?
+## Professional project workflow ✅ (planning · creation · management)
+A senior-architect workflow for building & running projects. Key modules:
+`planner.py`, `registry.py`, `manage.py`, `clickup.py`, `slack_bot.py`.
+
+**Planning** (persona protocol, one question at a time via `ask`):
+- Establish **scope** first — prototype vs production — which tunes depth.
+- Consult goal / platforms / scale / deadline / constraints; **recommend** a stack
+  + SEO/performance/scaling/security approach with trade-offs and "what to avoid".
+- Summarise for approval → write **`plan.md`** in the project folder.
+
+**Creation** (`create_project`, after you confirm folder + ClickUp space):
+- Folder under **GitHub root** (`config.GITHUB_ROOT`) + `plan.md` + README + `.gitignore`
+  + **`git init`** (you push manually — no auto-remote).
+- **ClickUp** list in the chosen space (tasks/subtasks/checklists).
+- Node under **Projects** in the knowledge graph (stack, decisions, scope).
+- **Private Slack `#devlog-<project>`** channel (invites you, posts the plan).
+- All recorded in the **project registry** (`~/.patroam/projects.json`) — the source
+  of truth: name → folder, git remote, ClickUp list id, Slack channel id, plan.md.
+
+**Management** (`resume_project` intent — "let's work on X, where were we?"):
+- git (branch, last commit, uncommitted), ClickUp (in-progress task), Slack (recent
+  dev-log), plan.md (next task) → focused resume + LLM-recommended next action.
+
+### Setup for the Slack pieces
+**Get your Slack user id** (for `SLACK_USER_ID`, so PATROAM can invite you to new
+dev-log channels): in Slack → click your profile → **⋯ (More)** → **Copy member ID**
+(looks like `U0XXXXXXX`). Add it to `~/.patroam/secrets.json` as `"SLACK_USER_ID"`.
+
+**Add bot scopes** (so PATROAM can create/read private channels): https://api.slack.com/apps
+→ your **P.A.T.R.O.A.M** app → **OAuth & Permissions** → **Bot Token Scopes** →
+**Add an OAuth Scope**, add: `groups:write`, `groups:read`, `groups:history`
+(private channels), and `channels:history` + `chat:write` (already present). Then
+scroll up → **Reinstall to Workspace** → Allow. (The bot only sees private channels
+it's a member of — it auto-joins the ones it creates.)
+
+---
+
+### Decisions (resolved) / open
+- **ClickUp** ✅ token + spaces configured; Planner asks which space each time.
+- **GitHub** ✅ root = `Documents\GitHub`; `git init` only, you push manually.
+- **Slack dev-logs** ✅ private; needs the scopes + `SLACK_USER_ID` above.
+- **Mail** (Phase 5, deferred): provider — Gmail API, IMAP, or Outlook?

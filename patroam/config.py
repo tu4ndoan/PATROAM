@@ -86,15 +86,10 @@ NEWS_COUNTRY = os.environ.get("PATROAM_NEWS_COUNTRY", "us")
 #   {"feeds": ["https://...rss"], "interests": ["ai", "vietnam", "oncology"]}
 NEWS_MAX = int(os.environ.get("PATROAM_NEWS_MAX", "6"))
 _DEFAULT_FEEDS = [
-    "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://feeds.npr.org/1001/rss.xml",
-    "https://feeds.arstechnica.com/arstechnica/index",
-    "https://hnrss.org/frontpage",
-    "https://techcrunch.com/feed/",
     "https://baochinhphu.vn/rss"
 ]
 # Topics/keywords you personally care about (used to rank & pick headlines).
-_DEFAULT_INTERESTS = ["war", "conflict", "technology", "Startup", "Bitcoin"]
+_DEFAULT_INTERESTS = ["technology"]
 
 
 def _load_news():
@@ -124,6 +119,19 @@ NEWS_WATCH_MAX = int(os.environ.get("PATROAM_NEWS_WATCH_MAX", "5"))
 NEWS_WATCH_INTERESTS_ONLY = os.environ.get(
     "PATROAM_NEWS_WATCH_INTERESTS_ONLY", "1") not in ("0", "false", "False", "")
 NEWS_SEEN_FILE = os.path.join(os.path.expanduser("~"), ".patroam", "news_seen.json")
+
+# ── Launch briefing (project progress + notes review + "what's up") on startup ────
+LAUNCH_BRIEFING = os.environ.get("PATROAM_LAUNCH_BRIEFING", "1") not in ("0", "false", "False", "")
+# Also brief each time you wake PATROAM with the wake word (you can barge-in to skip).
+BRIEF_ON_WAKE = os.environ.get("PATROAM_BRIEF_ON_WAKE", "1") not in ("0", "false", "False", "")
+# Min seconds between wake-briefings (0 = every wake). Within the gap you just get a greeting.
+BRIEF_ON_WAKE_COOLDOWN = int(os.environ.get("PATROAM_BRIEF_WAKE_COOLDOWN", "0"))
+# Snapshot of last session's state, for "since our last session…" deltas.
+SESSION_FILE = os.path.join(os.path.expanduser("~"), ".patroam", "session.json")
+# A Spotify playlist URL for the briefing's "shall I put on your Focus playlist?" offer.
+SPOTIFY_FOCUS_URL = os.environ.get("SPOTIFY_FOCUS_URL", "")
+# Slack channel id to scan for customer feedback/complaints in the briefing (optional).
+SLACK_FEEDBACK_CHANNEL = os.environ.get("SLACK_FEEDBACK_CHANNEL", "")
 
 # ── Slack (chat with PATROAM from your phone) ─────────────────────────────────────
 # Socket Mode: PATROAM connects OUT to Slack, so it runs on your computer with no
@@ -157,10 +165,83 @@ FAB_DOWNLOAD_URL = os.environ.get("PATROAM_FAB_DOWNLOAD_URL",
                                   "https://www.fab.com/i/portal/sales/reports/download")
 FAB_REPORT_DAYS = int(os.environ.get("PATROAM_FAB_REPORT_DAYS", "365"))
 
+# ── Content pipeline (one video → tailored posts on 5 platforms) ──────────────────
+# "post my reel" / "publish my video": PATROAM writes a hook + caption + hashtags
+# TAILORED to each platform, then publishes to every platform whose credentials are
+# set below. Platforms without credentials fall back to ASSISTED mode (PATROAM opens
+# the upload page and copies the caption to your clipboard so you paste it yourself)
+# — so the pipeline is useful today and each platform turns fully automatic the
+# moment you drop its token into ~/.patroam/secrets.json.
+#
+# Where PATROAM looks for the edited video (newest file wins) and logs each package.
+CONTENT_DIR = os.environ.get(
+    "PATROAM_CONTENT_DIR", os.path.join(os.path.expanduser("~"), ".patroam", "content"))
+CONTENT_LOG = os.path.join(CONTENT_DIR, "posts.json")
+# Video extensions the pipeline recognises when auto-picking the latest clip.
+CONTENT_VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".webm")
+# Your niche + persona — steers the caption/hook copywriting. Edit to taste.
+CONTENT_NICHE = os.environ.get(
+    "PATROAM_CONTENT_NICHE",
+    "I create and sell 3D game assets — animation packs and environments — for game "
+    "developers on Fab.com (Epic Games' marketplace). My audience is aspiring 3D "
+    "artists and indie devs who want to earn recurring income from their craft.")
+# Which platforms the pipeline targets, in posting order. Trim to taste.
+CONTENT_PLATFORMS = [p.strip().lower() for p in os.environ.get(
+    "PATROAM_CONTENT_PLATFORMS", "tiktok,instagram,youtube,threads,x").split(",") if p.strip()]
+
+# Per-platform credentials (all optional — missing ones use assisted mode).
+# TikTok — Content Posting API (open.tiktokapis.com). OAuth user access token with
+# the `video.publish` scope.
+TIKTOK_ACCESS_TOKEN = os.environ.get("TIKTOK_ACCESS_TOKEN", "")
+# Instagram Reels — Graph API. A long-lived token + the IG *user* id. Reels upload
+# needs the video reachable at a PUBLIC url (Graph API pulls it), see CONTENT_PUBLIC_BASE.
+IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")
+IG_USER_ID = os.environ.get("IG_USER_ID", "")
+# Threads — Threads Graph API. Token + Threads user id. Video also needs a PUBLIC url.
+THREADS_ACCESS_TOKEN = os.environ.get("THREADS_ACCESS_TOKEN", "")
+THREADS_USER_ID = os.environ.get("THREADS_USER_ID", "")
+# YouTube Shorts — Data API v3. An OAuth *refresh* token + the client id/secret it
+# was issued for; PATROAM exchanges it for an access token and does a resumable upload
+# of the LOCAL file (no public url needed).
+YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID", "")
+YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
+YOUTUBE_REFRESH_TOKEN = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
+# X (Twitter) — API v2 + v1.1 media upload. OAuth 1.0a user-context keys (needs a
+# paid tier that allows posting). Uploads the LOCAL file.
+X_API_KEY = os.environ.get("X_API_KEY", "")
+X_API_SECRET = os.environ.get("X_API_SECRET", "")
+X_ACCESS_TOKEN = os.environ.get("X_ACCESS_TOKEN", "")
+X_ACCESS_SECRET = os.environ.get("X_ACCESS_SECRET", "")
+# Optional: a public base URL that maps to CONTENT_DIR (e.g. an ngrok/S3/CDN mount),
+# so Instagram/Threads — which pull the video from a url — can be fully automated.
+# If empty, those two use assisted mode even when their tokens are present.
+CONTENT_PUBLIC_BASE = os.environ.get("PATROAM_CONTENT_PUBLIC_BASE", "")
+
+# Upload-page URLs used in ASSISTED mode (opened in Brave with the caption copied).
+CONTENT_UPLOAD_URLS = {
+    "tiktok": "https://www.tiktok.com/upload",
+    "instagram": "https://www.instagram.com/",
+    "youtube": "https://studio.youtube.com/",
+    "threads": "https://www.threads.net/",
+    "x": "https://x.com/compose/post",
+}
+
 # ── ClickUp (Planner agent pushes project roadmaps here) ──────────────────────────
-# Personal API token (ClickUp → Settings → Apps) + the Space id (from its URL).
+# Personal API token (ClickUp → Settings → Apps) + the default Space id (the
+# Planner asks which space each time, falling back to this).
 CLICKUP_API_TOKEN = os.environ.get("CLICKUP_API_TOKEN", "")
 CLICKUP_SPACE_ID = os.environ.get("CLICKUP_SPACE_ID", "")
+
+# ── Projects (professional planning / creation / management) ──────────────────────
+# Where your code projects live (the Planner creates new project folders here and
+# reads them for "where were we?"). git init only — you push manually.
+GITHUB_ROOT = os.environ.get(
+    "PATROAM_GITHUB_ROOT", os.path.join(os.path.expanduser("~"), "Documents", "GitHub"))
+# Registry mapping each project → its folder, git remote, ClickUp list, Slack channel.
+PROJECTS_REGISTRY = os.path.join(os.path.expanduser("~"), ".patroam", "projects.json")
+# Your Slack user id — so PATROAM can invite you to the private dev-log channels it
+# creates (find it in Slack: profile → ⋯ → Copy member ID, starts with "U").
+SLACK_USER_ID = os.environ.get("SLACK_USER_ID", "")
 
 # ── Vietnamese stocks (SSI FastConnect Data — official API) ───────────────────────
 # Register at https://iboard.ssi.com.vn → FastConnect Data to get a ConsumerID +
@@ -368,12 +449,18 @@ Anti-hallucination — do not invent APIs, URLs, libraries, statistics, document
 
 Structured format (OPTIONAL, written engineering work ONLY): the internal sections Understanding / Missing Information / Proposed Plan / Execution / Verification / Confidence Score / Memory Updates are a private thinking checklist. NEVER output these section headers, and NEVER say them aloud. By DEFAULT — and ALWAYS for questions, knowledge/recall, and casual chat — just give the answer directly and conversationally, with no preamble and no headings.
 
-Building & coding protocol — when the user asks you to build, create, scaffold, or code something non-trivial (an app, project, website, feature), DO NOT dump a full solution in one reply. Work as a multi-step collaborator:
-1) Briefly restate the goal and gather missing requirements, asking ONE question at a time with `ACTION: ask {"question":"…","options":["A","B"]}` whenever there's a real choice (framework, language, project structure, libraries) — e.g. "Do you want Provider or Riverpod, Sir?". Advise what you'd recommend and what to avoid.
-2) Propose a short plan and confirm before writing code.
-3) On the go-ahead, scaffold the folder structure with create_project (correct hierarchy for the type), write files with write_file, and run tests/builds with run.
-4) Report what you did and the next step.
-For small, unambiguous requests, just do it without questions.
+Project planning & creation protocol — when the user wants to build/create a project (app, website, service, feature set), act as a senior architect + delivery lead across TWO explicit phases. NEVER dump a solution or create anything until planning is done and confirmed.
+
+PLANNING PHASE — consult, one question at a time, using `ACTION: ask {"question":"…","options":["A","B"]}` for every real choice, and ALWAYS recommend an option with a one-line why + what to avoid:
+1) First establish SCOPE: is this a quick prototype or a production project to ship? This drives everything — keep a prototype lean; only a production build warrants heavy SEO/scaling/security work.
+2) Gather the details that matter: the goal/problem, target platform(s), expected users/scale, deadline/timeline, key constraints, and integrations.
+3) Recommend the STACK (language, framework, database, hosting) tailored to those requirements, with trade-offs — and advise on SEO, performance, scaling, and security as appropriate to the scope.
+4) Keep going until you genuinely have enough to plan well (confidence ≥ 90%). Summarise the agreed plan back to the user.
+
+CREATION PHASE — only after the user approves the plan:
+5) Confirm logistics with `ask`: which folder/location for the project, and which ClickUp space to use.
+6) Then emit ONE `ACTION: create_project {…}` with the full brief in `description`, decisions in `choices`, `prototype` true/false, and the chosen `folder`/`clickup_space`. PATROAM writes plan.md, initialises git, creates the ClickUp list + tasks, adds it to the knowledge graph, and opens a private Slack dev-log channel. Report the result and the next step.
+For small, unambiguous requests (a single script/file), skip the ceremony and just do it.
 
 Act as a senior software architect, senior iOS engineer, senior backend engineer, and knowledge-management system working together. Your job is not to answer quickly — it is to help the user reach the correct solution with verifiable evidence.
 

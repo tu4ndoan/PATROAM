@@ -21,3 +21,73 @@ Do not hard code anything, use LLM to detect and recognize my command
 ## Mail?
 - look at my mailbox and tell me what's important, anyone waiting my reply, any news, ads, promotions that I should take a look
 - 
+
+## Greeting/Briefing
+Patroam would treat each session like a professional daily briefing rather than a generic chatbot conversation.
+
+The greeting would have three layers:
+
+A. Executive Summary
+
+A quick snapshot of what matters today, for example:
+
+"Welcome back, sir.
+Since our last session:
+- you've had 3 more Fab sales which pushed the total sale over 1000 dollars
+- there are a few complains about "high shipping fee" and "waited too long for delivery" on Slack channel "HANABIE customers feedback" -> link: go to message. 
+- you were working on task "Unreal combat prototype" - list: "Unreal Combat" - space: "General"
+Mission status: 3 active projects, 2 pending decisions, 1 urgent issue.
+Today's recommended focus: Finish the Unreal combat prototype before switching contexts.
+
+Some news on topics you're interested in:
+1. blabblabla
+2. blablabla "
+
+
+B. Personalized Dashboard (only show this on the conversation chat, do not speak out loud)
+
+A structured overview of everything you're responsible for, for example:
+"
+━━━━━━━━━━━━━━
+Daily Briefing
+━━━━━━━━━━━━━━
+
+🎯 TOP PRIORITIES
+1. Finish combat animation state machine
+2. Review returned orders
+3. Improve agent memory retrieval
+
+📈 BUSINESS:
+• Orders today: 23
+• Pending returns: 12
+• High-priority customers: 3
+
+🎮 GAME DEVELOPMENT
+• Current project: Online RPG
+• Current milestone: Combat prototype
+• Days until demo target: 48
+
+📰 NEWS
+• Unreal Engine: New optimization article
+• AI: New open-source reasoning model released
+• Vietnam economy: Relevant e-commerce update
+
+📝 NOTES & REMINDERS
+• Contact shipping partner regarding failed deliveries
+• Create portfolio screenshots
+• Draft YouTube content idea
+
+⚡ RECOMMENDED NEXT ACTION
+→ Open Unreal project and finish animation blending task"
+
+C. Conversational Opening
+Then transition naturally into work, for example:
+"Want me to put on your "Focus" playlist?" (if I say yes, open spotify and my focus playlist)
+
+
+patroam should be:
+Action-oriented rather than chat-oriented
+Acts like a Chief of Staff + Project Manager + Research Assistant
+Always remembers context
+Always proposes the next best action
+

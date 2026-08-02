@@ -51,6 +51,22 @@ ADS_CTX_RE = re.compile(r"\b(doing|stats|statistics|performance|results?|spend|s
 # News command ("what's up", "what's new", "news", "headlines", …).
 NEWS_RE = re.compile(r"\b(what'?s up|what'?s new|what is up|news|headlines|catch me up)\b", re.I)
 
+# Post/publish a video to social media (the content pipeline).
+POST_CONTENT_RE = re.compile(
+    r"\b(post|publish|upload|share)\b.{0,30}\b(reel|reels|short|shorts|video|clip|content|"
+    r"tiktok|instagram|threads)\b"
+    r"|\b(đăng|xu[aấ]t b[aả]n|t[aả]i l[eê]n)\b.{0,30}\b(reel|video|clip|b[aà]i)\b", re.I)
+
+
+_AFFIRM_RE = re.compile(
+    r"^\s*(yes|yeah|yep|yup|sure|ok|okay|please|please do|go ahead|do it|"
+    r"yes please|sounds good|absolutely|definitely|y)\b", re.I)
+
+
+def is_affirmative(text):
+    """A simple yes to a yes/no offer (e.g. the briefing's Focus-playlist prompt)."""
+    return bool(_AFFIRM_RE.match(text or ""))
+
 
 def graph_view_mode(text):
     """Detect a 'change the knowledge-graph view' command → 'flat' | 'sphere' |
@@ -630,13 +646,24 @@ _ROUTER_PROMPT = (
     '- "fab": the user\'s Fab.com store sales/revenue.\n'
     '- "ads": the user\'s Meta/Facebook ad performance. Add {"query":"..."}.\n'
     '- "news": latest news/headlines. Add {"topic":"..."} (empty for general).\n'
-    '- "briefing": a general "what\'s up / catch me up" overview.\n'
+    '- "briefing": a full daily briefing / the user is STARTING A WORK SESSION. Use '
+    'for "time to work", "let\'s get back to work", "let\'s start", "begin", "catch '
+    'me up", "brief me", "what\'s up", "what should I do" — anything signalling they '
+    "are sitting down to work and want orienting.\n"
     '- "new_note": take/write/save a note. Add {"text":"..."} if they dictated the '
     "note content, otherwise omit it.\n"
-    '- "project_status": asking about project progress, where they left off, what '
-    "to do next, or whether they're on schedule.\n"
+    '- "project_status": asking about ALL projects\' progress in general, where they '
+    "left off across everything, or whether they're on schedule.\n"
+    '- "resume_project": open/continue/resume a SPECIFIC named project — "let\'s work '
+    'on project iC", "where were we on hanabie", "open the X project". Add {"project":"NAME"}.\n'
     '- "note_suggestions": asking what their notes say, or for suggestions / '
     "conflicts from their notes.\n"
+    '- "post_content": publish/post/share a video (reel, short, clip) to social '
+    "media — TikTok, Instagram, YouTube, Threads, X. The user edited a video and "
+    'wants it posted. Add {"brief":"..."} if they described what the video is about, '
+    'and {"video":"..."} if they named a file/path. e.g. "post my new reel", "publish '
+    'this video about the environment pack", "đăng reel mới lên hết các nền tảng".\n'
+    '- "content_history": asking what they posted / their recent posts / post history.\n'
     '- "backup_graph": back up / save a copy of the knowledge graph.\n'
     '- "none": anything else — general chat, coding, BUILDING apps/projects, '
     "questions.\n\n"
@@ -645,7 +672,13 @@ _ROUTER_PROMPT = (
     '"how were my sales on fab" -> {"skill":"fab"}; '
     '"take a note: buy milk" -> {"skill":"new_note","text":"buy milk"}; '
     '"where did I leave off" -> {"skill":"project_status"}; '
+    '"let\'s work on project iC, where were we" -> {"skill":"resume_project","project":"iC"}; '
+    '"time to work" -> {"skill":"briefing"}; '
+    '"let\'s get back to work" -> {"skill":"briefing"}; '
     '"back up my knowledge graph" -> {"skill":"backup_graph"}; '
+    '"post my new reel about the animation pack" -> {"skill":"post_content","brief":"the animation pack"}; '
+    '"đăng video này lên hết đi" -> {"skill":"post_content"}; '
+    '"what have I posted lately" -> {"skill":"content_history"}; '
     '"what should I work on from my notes" -> {"skill":"note_suggestions"}; '
     '"build me a flutter app" -> {"skill":"none"}; '
     '"what stock API should I use" -> {"skill":"none"}.\n\n'
@@ -688,14 +721,25 @@ def _dispatch(intent, text):
         from . import news
         return news.latest(intent.get("topic") or "", config.NEWS_MAX)
     if skill == "briefing":
-        return _briefing(text)
+        from . import briefing
+        return briefing.gather() or _briefing(text)   # full daily briefing; markets fallback
     # New skills (full implementations land in later phases — stubs prove routing).
     if skill == "new_note":
         return _new_note(intent.get("text") or "")
     if skill == "project_status":
         return _project_status()
+    if skill == "resume_project":
+        from . import manage
+        return manage.resume(intent.get("project") or text)
     if skill == "note_suggestions":
         return _note_suggestions()
+    if skill == "post_content":
+        from . import content
+        return content.publish(intent.get("brief") or "", intent.get("video") or "")
+    if skill == "content_history":
+        from . import content
+        rep = content.last_posts()
+        return rep or "You haven't posted anything through me yet, Sir."
     if skill == "backup_graph":
         return _backup_graph()
     return None   # "none" or unknown → not a data request
@@ -703,8 +747,12 @@ def _dispatch(intent, text):
 
 # ── Planner / Notes / backup skills (Phase 1 stubs; filled in later phases) ─────────
 def _new_note(text):
-    return ("I'll open a note window for you, Sir — note-taking is coming in the "
-            "next update." + (f' (You said: "{text}")' if text else ""))
+    from . import notes
+    text = (text or "").strip()
+    if text:                                       # dictated note → save straight away
+        return notes.save_note("", text)
+    # No content → ask the UI to pop the note window (Controller handles "ui").
+    return {"say": "Opening a new note, Sir.", "show": "📝 New note", "ui": "new_note"}
 
 
 def _project_status():
@@ -713,8 +761,11 @@ def _project_status():
 
 
 def _note_suggestions():
-    return ("Your notes assistant isn't set up yet, Sir — coming soon. It will read "
-            "your notes and surface suggestions and schedule conflicts.")
+    from . import notes
+    rep = notes.review()
+    if rep is None:
+        return "You have no notes yet, Sir. Say \"take a note\" to start one."
+    return rep
 
 
 def _backup_graph():
@@ -743,6 +794,9 @@ def _regex_data_handle(text):
     if ADS_RE.search(text) and ADS_CTX_RE.search(text):
         from . import meta_ads
         return meta_ads.summary(text)
+    if POST_CONTENT_RE.search(text):
+        from . import content
+        return content.publish("", "")
     if NEWS_RE.search(text):
         return _briefing(text)
     return None

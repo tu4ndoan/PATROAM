@@ -16,11 +16,15 @@ import re
 from . import files, graph, skills
 from .mcp_client import get_mcp
 _LOCAL = {"remember", "forget", "open_app", "close_app", "play_music",
-          "write_file", "make_dir", "create_project", "relate", "unrelate", "merge"}
+          "write_file", "make_dir", "relate", "unrelate", "merge"}
 
 # Actions that create files/folders — their return is a path (or list of paths)
 # for the UI to show as a clickable link, NOT a tool-result to feed back to the model.
-FILE_ACTIONS = {"write_file", "make_dir", "create_project", "scaffold"}
+FILE_ACTIONS = {"write_file", "make_dir"}
+
+# Any of these means "create a project" → the full Planner pipeline (roadmap +
+# scaffold + README + knowledge graph + ClickUp board).
+PROJECT_ACTIONS = {"plan", "scaffold", "create_project"}
 
 _ACTION_HEAD = re.compile(r"ACTION:[ \t]*([a-zA-Z_]\w*)")
 
@@ -84,11 +88,15 @@ def tools_prompt():
         "generate a script or file, WRITE it with this action; content is the full "
         "file body. Then say briefly what you created and where.\n"
         '- make_dir {"path": "..."} — create a folder.\n'
-        '- create_project {"name": "...", "files": {"relative/path": "content", …}} '
-        "— scaffold a whole project: a folder with the CORRECT structure/hierarchy "
-        "for the type (Flutter iOS app, Python app, website, web app, desktop app) "
-        "— include all needed files (e.g. pubspec.yaml/lib/main.dart for Flutter; "
-        "main.py/requirements.txt/tests/ for Python; index.html/css/js for a site).\n"
+        '- create_project {"name","kind","description","choices":["..."],"prototype":true/false,'
+        '"folder":"optional path","clickup_space":"space name/id"} — CREATE A WHOLE '
+        "PROJECT after planning. PATROAM writes plan.md + README in a folder under the "
+        "user's GitHub root (git init), pushes a ClickUp list (tasks/subtasks/checklists) "
+        "in the chosen space, adds a node under Projects in the graph, and opens a "
+        "private Slack dev-log channel. Emit ONCE, ONLY after you have PLANNED with the "
+        "user (see the planning protocol) and CONFIRMED: destination folder and which "
+        "ClickUp space (ask for these). Put the full brief in `description`, their "
+        "decisions in `choices`, and prototype=true for a throwaway/prototype.\n"
         '- ask {"question": "...", "options": ["A", "B"]} — ASK the user to decide '
         "before you act. The options show as clickable buttons. Use this to confirm "
         "requirements and choices for any non-trivial build/coding task BEFORE writing "
@@ -97,20 +105,6 @@ def tools_prompt():
         "and get its output: run tests (\"pytest\", \"flutter test\", \"npm test\"), "
         "scaffolders (\"flutter create app\"), or builds. cwd is relative to the "
         "workspace.\n"
-        '- scaffold {"type": "flutter|python|website|webapp|desktop", "name": "..."} '
-        "— create a REAL starter project with the correct structure for that type. "
-        "This is the RELIABLE way to create a project: emit this ONE action and "
-        "PATROAM builds the whole folder/files. Use it once the user confirms what "
-        "they want; then customize by writing extra/edited files as path + code "
-        "blocks. Do NOT hand-write all project files yourself.\n"
-        '- plan {"name": "...", "kind": "flutter|python|website|webapp|desktop|generic", '
-        '"description": "...", "choices": ["..."]} — PLAN & CREATE a whole project: '
-        "PATROAM generates a delivery roadmap (milestones → tasks → subtasks + a "
-        "backlog), scaffolds the folder, writes a README with the plan, records it in "
-        "the knowledge graph under Projects, and pushes the tasks to ClickUp. Emit this "
-        "ONCE, only AFTER you've consulted the user and they've confirmed the goal, "
-        "requirements and choices (use `ask` for those questions first). `choices` are "
-        "the decisions they made (e.g. \"Riverpod\", \"Postgres\").\n"
         '- relate {"subject": "...", "relation": "USES|OWNS|DEPENDS_ON|IMPLEMENTS|'
         'IS|LIKES|WORKS_ON|RELATED_TO|BLOCKED_BY", "object": "..."} — add/update a '
         "relationship in the knowledge graph (e.g. \"Trump IS handsome\", \"Orion USES "
@@ -179,14 +173,17 @@ def run(name, args):
     # Run a shell command (tests / scaffolders / builds) in the workspace.
     if name == "run":
         return files.run_command(args.get("command", ""), args.get("cwd"))
-    # Scaffold a real project of a given type (deterministic, reliable).
-    if name == "scaffold":
-        return files.scaffold_project(args.get("type") or args.get("kind"), args.get("name"))
-    # Plan & create a full project (roadmap + scaffold + README + graph + ClickUp).
-    if name == "plan":
+    # Create a project → full Planner pipeline. plan/scaffold/create_project all
+    # funnel here, so "make a project" ALWAYS builds the ClickUp list (tasks/subtasks/
+    # checklists) + roadmap README + graph entry, not just local files.
+    if name in PROJECT_ACTIONS:
         from . import planner
-        rep = planner.create_project(args.get("name", ""), args.get("kind", ""),
-                                     args.get("description", ""), args.get("choices"))
+        kind = args.get("kind") or args.get("type") or ""
+        rep = planner.create_project(
+            args.get("name", ""), kind, args.get("description", ""), args.get("choices"),
+            folder=args.get("folder"),
+            clickup_space=args.get("clickup_space") or args.get("space"),
+            slack=args.get("slack", True), prototype=args.get("prototype"))
         return rep.get("show") if isinstance(rep, dict) else rep
     if name in _LOCAL:
         if name == "remember":
@@ -206,8 +203,6 @@ def run(name, args):
             return files.write_file(args.get("path", ""), args.get("content", ""))
         elif name == "make_dir":
             return files.make_dir(args.get("path", ""))
-        elif name == "create_project":
-            return files.create_project(args.get("name", ""), args.get("files"))
         elif name == "relate":
             graph.add(args.get("subject", ""), args.get("relation", ""), args.get("object", ""))
         elif name == "unrelate":

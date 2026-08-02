@@ -44,6 +44,18 @@ _CONT_WORDS = {
 _WORDS_RE = re.compile(r"[a-z0-9']+")
 
 
+def _vlog(msg):
+    """Append a [voice] line to the startup log (to diagnose the wake word)."""
+    try:
+        import datetime
+        import os
+        with open(os.path.join(os.path.expanduser("~"), ".patroam", "startup.log"),
+                  "a", encoding="utf-8") as f:
+            f.write(f"{datetime.datetime.now():%H:%M:%S}  [voice] {msg}\n")
+    except Exception:
+        pass
+
+
 class WakeWordListener:
     def __init__(self, on_command, on_status=None, on_wake=None, on_sleep=None,
                  on_greet=None, recognize=None, session_timeout=None):
@@ -122,6 +134,7 @@ class WakeWordListener:
         text = self._transcribe(audio).strip()
         if not text:
             return
+        _vlog(f"heard: {text!r} (active={self._active})")
 
         with self._lock:
             active = self._active
@@ -156,7 +169,9 @@ class WakeWordListener:
     def _handle_passive(self, text):
         command = find_command(text)
         if command is None:
+            _vlog(f"no wake word in {text!r}")
             return  # no wake word; stay passive
+        _vlog(f"WAKE matched; command={command!r}")
 
         self.on_wake()
         with self._lock:
@@ -278,13 +293,18 @@ class WakeWordListener:
     def start(self):
         if self.listening:
             return
-        mic = sr.Microphone(sample_rate=16000)
-        with mic as source:
-            self.recognizer.adjust_for_ambient_noise(source, duration=0.6)
+        try:
+            mic = sr.Microphone(sample_rate=16000)
+            with mic as source:
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.6)
+        except Exception as e:
+            _vlog(f"MIC ERROR: {e}")
+            raise
         self._stop = self.recognizer.listen_in_background(
             mic, self._callback, phrase_time_limit=config.PHRASE_TIME_LIMIT
         )
         self.listening = True
+        _vlog("listener started OK (mic open, listening for wake word)")
         self._endpoint = threading.Thread(target=self._endpoint_loop, daemon=True)
         self._endpoint.start()
         self._watchdog = threading.Thread(target=self._watch, daemon=True)
