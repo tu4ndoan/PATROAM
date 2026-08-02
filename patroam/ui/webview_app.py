@@ -662,6 +662,14 @@ class Controller:
         try:
             models = self.list_models()
             self._eval("window.patroam.setModels(%s)" % json.dumps(models))
+            if not models:
+                # No backend at all: without this PATROAM just sits there silently
+                # and a new user has no idea why it never answers.
+                msg = ("No AI model found — install Ollama (ollama.com), then run "
+                       "'ollama pull qwen3.5', or set ANTHROPIC_API_KEY for Claude.")
+                _dlog("no models available")
+                self.set_status(msg)
+                self._chat_done(msg)
         except Exception:
             pass
         try:

@@ -33,9 +33,11 @@ _load_secrets()
 OLLAMA_URL = os.environ.get("PATROAM_OLLAMA_URL", "http://localhost:11434")
 
 # Preferred model to start on. Matched flexibly against the available models
-# (exact, case-insensitive, then substring), so "llama3" picks "Llama3:latest".
+# (exact, case-insensitive, punctuation-insensitive, then substring), so "llama3"
+# picks "Llama3:latest" and "gemma4.31b" still finds "gemma4:31b".
 # Override with PATROAM_MODEL (e.g. "claude-opus-4-8"; Claude needs ANTHROPIC_API_KEY).
-DEFAULT_MODEL = os.environ.get("PATROAM_MODEL", "gemma4.31b-cloud")
+# If none of these are installed, PATROAM falls back to any local model you have.
+DEFAULT_MODEL = os.environ.get("PATROAM_MODEL", "gemma4:31b-cloud")
 
 # Preferred CLOUD vision model (Claude reads images very well). Used when an
 # ANTHROPIC_API_KEY is configured; otherwise PATROAM falls back to a local
