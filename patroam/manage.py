@@ -27,16 +27,27 @@ def _git(folder):
 
 
 def _find(name):
-    """(folder, record) for a project — from the registry, else by searching the
-    GitHub root for a folder whose name matches."""
-    rec = registry.get(name) or {}
+    """(folder, record) for a project — the registry entry merged with what we can
+    discover live (repo folder + ClickUp list), so a project registered without a
+    ClickUp list still resolves to one, and vice versa."""
+    rec = dict(registry.get(name) or {})
+    key = _norm(name)
+    # Merge in the live record for this project (adds clickup_list_id / folder).
+    try:
+        for d in discover_projects():
+            if _same_project(key, _norm(d.get("name", ""))) or \
+               _same_project(key, _norm(d.get("clickup_name", ""))):
+                for k, v in d.items():
+                    rec.setdefault(k, v)
+                break
+    except Exception:
+        pass
     if rec.get("folder") and os.path.isdir(rec["folder"]):
         return rec["folder"], rec
     root = config.GITHUB_ROOT
     if os.path.isdir(root):
-        key = "".join(c for c in name.lower() if c.isalnum())
         for d in os.listdir(root):
-            if key and key in "".join(c for c in d.lower() if c.isalnum()):
+            if key and key in _norm(d):
                 return os.path.join(root, d), rec
     return rec.get("folder"), rec
 
@@ -49,7 +60,7 @@ def _clickup_state(rec):
         tasks = clickup.list_tasks(lid)
     except Exception:
         return {}
-    open_t = [t for t in tasks if (t.get("status") or {}).get("type") not in ("done", "closed")]
+    open_t = [t for t in tasks if not clickup.is_done(t)]
     inprog = [t for t in open_t if "progress" in ((t.get("status") or {}).get("status", "").lower())]
     nxt = inprog or open_t
     return {"open": len(open_t), "working": nxt[0].get("name") if nxt else None}
@@ -81,9 +92,23 @@ def _norm(n):
     return "".join(c for c in (n or "").lower() if c.isalnum())
 
 
+def _same_project(a, b):
+    """Whether a repo folder and a ClickUp list name refer to the same project.
+    ClickUp lists are usually titled more fully than the folder — the repo
+    'tu4ndoan' is the list 'tu4ndoan — Personal Website' — so a prefix match on
+    the normalised names counts, not just an exact one."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= 4 and long_.startswith(short)
+
+
 def discover_projects():
-    """Real projects = git repos in the GitHub root + lists in the ClickUp space.
-    Merged by normalised name. Returns [{name, folder?, clickup_list_id?}]."""
+    """Real projects = git repos in the GitHub root + lists in the ClickUp space,
+    merged into one record per project. Returns [{name, folder?, clickup_list_id?}].
+    """
     out = {}
     root = config.GITHUB_ROOT
     if os.path.isdir(root):
@@ -95,12 +120,76 @@ def discover_projects():
         if clickup.available():
             for lst in clickup._space_lists(config.CLICKUP_SPACE_ID):
                 nm = lst.get("name", "")
-                rec = out.setdefault(_norm(nm), {"name": nm})
+                key = _norm(nm)
+                # Attach to the matching repo if there is one, so a project never
+                # shows up twice (once as the folder, once as the ClickUp list).
+                hit = next((k for k in out if _same_project(k, key)), None)
+                rec = out[hit] if hit else out.setdefault(key, {"name": nm})
                 rec["clickup_list_id"] = lst.get("id")
+                rec["clickup_name"] = nm
                 rec.setdefault("name", nm)
     except Exception:
         pass
     return list(out.values())
+
+
+def recent_commits(folder, limit=8):
+    """Recent git commits for the project → [{subject, author, when, hash}]."""
+    if not folder or not os.path.isdir(os.path.join(folder, ".git")):
+        return []
+    try:
+        sep = "\x1f"          # unit separator — safe inside commit subjects
+        out = subprocess.run(
+            ["git", "log", f"-{int(limit)}", f"--pretty=%h{sep}%s{sep}%an{sep}%cr"],
+            cwd=folder, capture_output=True, text=True, timeout=15,
+            encoding="utf-8", errors="replace").stdout
+    except Exception:
+        return []
+    rows = []
+    for line in (out or "").splitlines():
+        parts = line.split(sep)
+        if len(parts) == 4:
+            rows.append({"hash": parts[0], "subject": parts[1],
+                         "author": parts[2], "when": parts[3]})
+    return rows
+
+
+def project_view(name):
+    """Everything the UI needs for a project panel: folder, git state, recent
+    commits, and live ClickUp tasks (open + recently completed)."""
+    folder, rec = _find(name)
+    disp = rec.get("name") or name
+    view = {"name": disp, "folder": folder or "", "git": {}, "code": {},
+            "commits": [], "tasks": {"open": [], "done": [], "counts": {}},
+            "progress": {}, "found": bool(folder or rec.get("clickup_list_id"))}
+    if folder:
+        view["git"] = _git(folder)
+        view["commits"] = recent_commits(folder)
+        try:
+            from . import codebase
+            view["code"] = codebase.analyze(folder)
+        except Exception:
+            view["code"] = {}
+    lid = rec.get("clickup_list_id")
+    if lid and clickup.available():
+        try:
+            tasks = clickup.list_tasks(lid, include_closed=True)
+        except Exception:
+            tasks = []
+        def row(t):
+            st = t.get("status") or {}
+            return {"name": t.get("name", ""), "status": st.get("status", ""),
+                    "url": t.get("url", ""), "closed_at": clickup._closed_ms(t)}
+        done = [row(t) for t in tasks if clickup.is_done(t)]
+        open_t = [row(t) for t in tasks if not clickup.is_done(t)]
+        done.sort(key=lambda r: r["closed_at"], reverse=True)
+        view["tasks"] = {"open": open_t[:12], "done": done[:8],
+                         "counts": {"open": len(open_t), "done": len(done),
+                                    "total": len(tasks)}}
+        view["clickup_url"] = f"https://app.clickup.com/{config.CLICKUP_TEAM_ID}/v/li/{lid}" \
+            if getattr(config, "CLICKUP_TEAM_ID", "") else ""
+    view["progress"] = project_progress(rec)
+    return view
 
 
 def project_progress(rec):
@@ -110,8 +199,8 @@ def project_progress(rec):
     if lid and clickup.available():
         try:
             tasks = clickup.list_tasks(lid, include_closed=True)
-            done = len([t for t in tasks if (t.get("status") or {}).get("type") in ("done", "closed")])
-            open_t = [t for t in tasks if (t.get("status") or {}).get("type") not in ("done", "closed")]
+            done = len([t for t in tasks if clickup.is_done(t)])
+            open_t = [t for t in tasks if not clickup.is_done(t)]
             nxt = open_t[0].get("name") if open_t else ""
             return {"done": done, "total": len(tasks), "next": nxt}
         except Exception:

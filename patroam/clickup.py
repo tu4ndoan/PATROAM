@@ -8,6 +8,7 @@ are set; otherwise the Planner still works locally (folder + README + graph).
 """
 
 import json
+import time
 import urllib.request
 
 from . import config
@@ -84,39 +85,68 @@ def _space_lists(space_id):
     return lists
 
 
-def list_tasks(list_id, include_closed=False):
+def list_tasks(list_id, include_closed=False, subtasks=True):
+    """Tasks in a list. `subtasks=True` matters: push_roadmap() files real work as
+    SUBTASKS under milestone tasks, and ClickUp omits subtasks unless asked — so
+    without it PATROAM only ever saw the milestone headers."""
     q = "true" if include_closed else "false"
+    sub = "&subtasks=true" if subtasks else ""
     try:
-        return _api("GET", f"/list/{list_id}/task?include_closed={q}&order_by=updated").get("tasks", [])
+        return _api("GET", f"/list/{list_id}/task?include_closed={q}{sub}"
+                           "&order_by=updated").get("tasks", [])
     except Exception:
         return []
 
 
-def summary(space_id=None):
+def is_done(task):
+    """True if a task is completed. ClickUp reports this via the status *type*
+    ('done' for a done-category status, 'closed' for the closed one)."""
+    return ((task.get("status") or {}).get("type") or "") in ("done", "closed")
+
+
+def _closed_ms(task):
+    """When the task was completed, in epoch-ms (0 if unknown)."""
+    try:
+        return int(task.get("date_closed") or task.get("date_done") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def summary(space_id=None, recent_days=7):
     """A snapshot of the user's tasks in the space: open count, what's in progress,
-    what was touched most recently ('working on'), with list names + links.
-    Returns None if ClickUp isn't configured."""
+    what was touched most recently ('working on'), AND what was completed recently
+    — read straight from ClickUp's date_closed, so it's correct even on the very
+    first run. Returns None if ClickUp isn't configured."""
     if not available():
         return None
     space_id = space_id or config.CLICKUP_SPACE_ID
     rows = []
     for lst in _space_lists(space_id):
-        for t in list_tasks(lst.get("id")):
+        # include_closed=True — completed tasks are the whole point of "what did I
+        # finish?"; without them PATROAM always answered "you've completed nothing".
+        for t in list_tasks(lst.get("id"), include_closed=True):
             st = t.get("status") or {}
             rows.append({
                 "id": t.get("id"), "name": t.get("name", ""),
                 "list": (t.get("list") or {}).get("name") or lst.get("name", ""),
                 "status": st.get("status", ""), "type": st.get("type", ""),
-                "url": t.get("url", ""), "updated": int(t.get("date_updated") or 0)})
-    is_done = lambda r: r["type"] in ("done", "closed")
-    open_rows = [r for r in rows if not is_done(r)]
+                "url": t.get("url", ""), "updated": int(t.get("date_updated") or 0),
+                "done": is_done(t), "closed_at": _closed_ms(t)})
+    open_rows = [r for r in rows if not r["done"]]
+    done_rows = [r for r in rows if r["done"]]
     prog_re = ("progress", "doing", "wip", "active", "working", "review")
     in_progress = [r for r in open_rows if any(k in r["status"].lower() for k in prog_re)]
     recent = sorted(open_rows, key=lambda r: r["updated"], reverse=True)[:5]
+    cutoff = (time.time() - recent_days * 86400) * 1000
+    done_recent = sorted([r for r in done_rows if r["closed_at"] >= cutoff],
+                         key=lambda r: r["closed_at"], reverse=True)
     return {
         "open": len(open_rows),
+        "done": len(done_rows),
+        "total": len(rows),
         "in_progress": in_progress[:5],
         "recent": recent,
+        "done_recent": done_recent[:8],
         "open_ids": [r["id"] for r in open_rows],
         "names": {r["id"]: r["name"] for r in rows},
         "lists": {r["id"]: r["list"] for r in rows},

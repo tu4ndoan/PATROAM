@@ -93,10 +93,19 @@ def _clickup(prev):
         s = None
     if not s:
         return None
+    # What ClickUp itself says was completed recently (works on the very first run,
+    # and survives a reset session.json).
+    names = [r["name"] for r in (s.get("done_recent") or []) if r.get("name")]
+    # Plus anything that was open last session and isn't now — catches tasks closed
+    # longer ago than the recent-window but still news to us.
     prev_cu = prev.get("clickup") or {}
     prev_ids = set(prev_cu.get("open_ids") or [])
     prev_names = prev_cu.get("names") or {}
-    s["completed"] = [prev_names.get(i, i) for i in (prev_ids - set(s["open_ids"]))][:6]
+    for i in (prev_ids - set(s["open_ids"])):
+        nm = prev_names.get(i, i)
+        if nm not in names:
+            names.append(nm)
+    s["completed"] = names[:6]
     return s
 
 

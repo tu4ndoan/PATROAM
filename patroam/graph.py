@@ -559,6 +559,41 @@ def sync_projects():
     return [r["name"] for r in real]
 
 
+def index_codebase(max_dirs=5, max_files=5):
+    """Put each project's SHAPE on the graph: its main directories and key files.
+
+    Node names are namespaced ("tu4ndoan/src", not "src") on purpose — every
+    Next.js project has an `app/` and a README.md, so bare names would fuse all
+    projects into one meaningless hub instead of clustering per project.
+
+    Tech stack is deliberately NOT graphed (it lives in the project view); this
+    keeps the graph about structure. Re-running replaces the previous structure
+    triples, so renamed/deleted files don't linger. Returns triples added."""
+    from . import codebase, manage
+    g = _load()
+    added = 0
+    for rec in manage.discover_projects():
+        folder, name = rec.get("folder"), rec.get("name")
+        if not folder or not name:
+            continue
+        info = codebase.analyze(folder)
+        if not info:
+            continue
+        pref = _norm(name) + "/"
+        # Drop this project's previous structure facts (idempotent re-index).
+        pc = _canon(name)
+        g["triples"] = [t for t in g["triples"] if not (
+            t["r"] in ("HAS_MODULE", "KEY_FILE") and _canon(t["s"]) == pc)]
+        for d in info.get("structure", [])[:max_dirs]:
+            if add(name, "HAS_MODULE", pref + d["name"], doc=name):
+                added += 1
+        for f in info.get("key_files", [])[:max_files]:
+            if add(name, "KEY_FILE", pref + f["name"], doc=name):
+                added += 1
+    _save()
+    return added
+
+
 def index_notes():
     """Link each file in NOTES_DIR under Notes and LLM-extract its facts."""
     from . import llm

@@ -330,6 +330,8 @@
     color:var(--fg); font-size:14px; backdrop-filter:blur(6px); user-select:none; }
   .gtool:hover { border-color:var(--accent); }
   .gtool.on { border-color:var(--accent); color:#fff; background:var(--hover); }
+  .gtool.spin { animation:kgspin .9s linear infinite; pointer-events:none; opacity:.75; }
+  @keyframes kgspin { to { transform:rotate(360deg); } }
   .kg-legend { display:none; position:absolute; top:44px; right:8px; z-index:31; width:196px;
     max-height:52%; overflow:auto; padding:9px 11px; border-radius:10px;
     background:rgba(10,10,10,.93); border:1px solid var(--border); backdrop-filter:blur(10px);
@@ -390,6 +392,47 @@
   ::-webkit-scrollbar-thumb:hover { background:var(--muted2); }
   ::selection { background:var(--accent); color:#0a0a0a; }
 
+  /* Clickable entity names inside the node detail panel */
+  .detail-rel .n { cursor:pointer; color:var(--fg); border-bottom:1px dotted var(--muted2); }
+  .detail-rel .n:hover { border-bottom-color:var(--fg); background:rgba(255,255,255,.06); }
+  .detail-rel .n.proj::after { content:'▸'; font-size:9px; opacity:.65; margin-left:4px;
+    vertical-align:2px; }   /* marks a project — opens the project view */
+
+  /* Project view (git + ClickUp) */
+  .pv { margin-top:10px; padding:10px 12px; border-radius:10px;
+    background:rgba(255,255,255,.035); border:1px solid var(--border);
+    font-family:"Segoe UI", system-ui, sans-serif; }
+  .pv-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .pv-title { font-weight:600; color:var(--fg); font-size:13px; }
+  .pv-path { font-size:10px; color:var(--muted2); word-break:break-all; margin-top:2px; }
+  .pv-sec { margin-top:9px; font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--muted2); }
+  .pv-row { font-size:11.5px; color:var(--muted); line-height:1.5; display:flex; gap:6px; }
+  .pv-row .k { color:var(--muted2); flex:none; }
+  .pv-c { font-size:11.5px; color:var(--muted); line-height:1.55; }
+  .pv-c .h { color:var(--muted2); font-family:var(--font-mono); font-size:10.5px; }
+  .pv-t { font-size:11.5px; line-height:1.6; display:flex; gap:6px; align-items:baseline; }
+  .pv-t .m { flex:none; width:11px; }
+  .pv-t.done { color:var(--muted2); }
+  .pv-t.done .nm { text-decoration:line-through; opacity:.75; }
+  .pv-t.open .m { color:#8fd0ff; }
+  .pv-t.done .m { color:#7ede9f; }
+  .pv-t .st { font-size:9.5px; color:var(--muted2); border:1px solid var(--border);
+    border-radius:4px; padding:0 4px; margin-left:auto; white-space:nowrap; }
+  .pv-bar { height:4px; border-radius:99px; background:rgba(255,255,255,.09); margin-top:6px;
+    overflow:hidden; }
+  .pv-bar i { display:block; height:100%; background:#7ede9f; }
+  .pv-empty { font-size:11px; color:var(--muted2); font-style:italic; }
+  .pv-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
+  .pv-tag { font-size:10.5px; padding:2px 7px; border-radius:5px; color:var(--fg);
+    background:rgba(255,255,255,.06); border:1px solid var(--border); white-space:nowrap; }
+  .pv-tag.lang { color:#8fd0ff; border-color:rgba(143,208,255,.3); }
+  .pv-f { font-size:11.5px; color:var(--muted); line-height:1.55; display:flex; gap:6px;
+    cursor:pointer; }
+  .pv-f:hover { color:var(--fg); }
+  .pv-f .ic { flex:none; opacity:.6; }
+  .pv-f .sz { margin-left:auto; font-size:10px; color:var(--muted2); }
+
   /* Subtle transparency pass — same tu4ndoan look, panels just let a bit more of
      the moving background show through (blur was already in place). */
   .bar { background:rgba(17,17,17,.55); }
@@ -434,6 +477,7 @@
           <input id="kgSearch" class="kg-search glass" placeholder="🔍 Search · A -&gt; B for path" />
           <canvas id="graphCv"></canvas>
           <div class="kg-toolbar">
+            <span class="gtool" id="gRefresh" title="Refresh — rescan projects &amp; files (keeps node positions)">⟳</span>
             <span class="gtool" id="gFit" title="Fit graph to view">⊹</span>
             <span class="gtool" id="gFreeze" title="Freeze layout (stop auto-arranging)">❄</span>
             <span class="gtool" id="gFocus" title="Focus mode — isolate the selected node">◎</span>
@@ -839,7 +883,7 @@ addEventListener('keydown',e=>{ if(e.key==='Escape') setFull(false); });
 const G={ nodes:[], edges:[], byId:{}, run:false, raf:0, t:0, hot:0, sel:null, hoverId:null,
   rotX:-0.18, rotY:0.5, zoom:1.05, spin:true, anchors:{}, anchors2:{}, colors:{}, layout:{},
   panX:0, panY:0, dragNode:null, dragSet:null, dragActive:false, panDrag:false, userPan:false,
-  focusMode:false, hulls: localStorage.getItem('kg_hulls')!=='0',
+  focusMode:false, centering:false, hulls: localStorage.getItem('kg_hulls')!=='0',
   frozen: localStorage.getItem('kg_frozen')==='1',   // freeze = never auto-arrange
   hideGroups:{}, linkFrom:null, path:null, saveTO:null,
   flat: localStorage.getItem('kg_flat') !== '0' };   // default to flat plane (set '0' for sphere)
@@ -1047,7 +1091,9 @@ function render3D(){
   // Centre the selected node in view (smooth pan); ease back to centre when none
   // is selected — but hold the pan while you're dragging a node.
   if(G.dragNode){ /* hold the pan while dragging a node */ }
-  else if(selN){ G.panX+=((cx-selN.bx)-G.panX)*0.12; G.panY+=((cy-selN.by)-G.panY)*0.12; }
+  else if(selN && G.centering){   // only on a deliberate jump (search / voice / path)
+    G.panX+=((cx-selN.bx)-G.panX)*0.12; G.panY+=((cy-selN.by)-G.panY)*0.12;
+    if(Math.abs((cx-selN.bx)-G.panX)<0.5 && Math.abs((cy-selN.by)-G.panY)<0.5) G.centering=false; }
   else if(!G.userPan){ G.panX+=(0-G.panX)*0.12; G.panY+=(0-G.panY)*0.12; }   // recentre
   // else: free pan set by middle-mouse drag — leave it where the user put it.
   for(const n of G.nodes){ n.sx=n.bx+G.panX; n.sy=n.by+G.panY; }
@@ -1215,7 +1261,10 @@ gcvEl.addEventListener('pointerdown', e=>{
   // Node-drag is accurate on the flat plane; in sphere view a drag rotates instead.
   G.dragNode = (G.flat && hit) ? hit : null;
   G.dragSet = G.dragNode ? descendantsOf(G.dragNode) : null;
-  if(G.dragNode){ G.userPan=true; G.dragActive=true; G.hot=1; }   // subtree gets physics
+  // NOTE: do NOT heat the simulation here. Pressing the mouse down is not a drag
+  // — heating on pointerdown made every plain CLICK re-run the physics, which is
+  // what made the whole graph wobble in place. Physics starts on first movement.
+  if(G.dragNode){ G.userPan=true; }
   try{ gcvEl.setPointerCapture(e.pointerId); }catch(_){} });
 // Suppress Chromium middle-click autoscroll so middle-drag pans instead.
 gcvEl.addEventListener('mousedown', e=>{ if(e.button===1) e.preventDefault(); });
@@ -1224,7 +1273,9 @@ addEventListener('pointermove', e=>{
   if(G.panDrag){ G.panX+=e.clientX-gLX; G.panY+=e.clientY-gLY; gLX=e.clientX; gLY=e.clientY; return; }
   if(!gDrag)return; const dx=e.clientX-gLX, dy=e.clientY-gLY;
   if(Math.abs(dx)+Math.abs(dy)>3) gMoved=true;
-  if(G.dragNode){ dragNodeTo(e.clientX, e.clientY); }
+  // Only once it's a real drag (not a sloppy click) does the node move and the
+  // subtree get physics.
+  if(G.dragNode && gMoved){ G.dragActive=true; dragNodeTo(e.clientX, e.clientY); }
   else if(!G.flat){ G.rotY+=dx*0.008; G.rotX=Math.max(-1.45,Math.min(1.45,G.rotX+dy*0.008)); }
   gLX=e.clientX; gLY=e.clientY; });
 addEventListener('pointerup', e=>{
@@ -1258,7 +1309,11 @@ gcvEl.addEventListener('pointermove', e=>{ if(gDrag) return;
   gcvEl.style.cursor=best?'pointer':(G.flat?'default':'grab'); });
 gcvEl.addEventListener('pointerleave', ()=>{ G.hoverId=null; });
 
-function selectNode(id){ G.sel=id; G.focus=true; G.userPan=false; renderDetail(); }  // re-enable centre-on-select
+// Select a node. `center` is opt-in: an ordinary CLICK must not move the view —
+// panning the whole graph on every click read as the graph wobbling. Only
+// deliberate jumps (search, voice focus, path-find) recentre the view.
+function selectNode(id, center){ G.sel=id; renderDetail();
+  if(center){ G.centering=true; G.focus=true; G.userPan=false; } }
 function clearSel(){ G.sel=null; renderDetail(); }
 // Esc: deselect, recentre, cancel free-pan / link mode, exit focus mode.
 addEventListener('keydown', e=>{ if(e.key==='Escape'){ G.userPan=false; cancelLink(); hideMenu();
@@ -1356,6 +1411,31 @@ function syncTools(){ const set=(id,on)=>{ const b=$(id); if(b) b.classList.togg
   set('gMini', $('kgMini').classList.contains('show'));
   const fz=$('gFreeze'); if(fz){ fz.textContent=G.frozen?'▶':'❄';
     fz.title=G.frozen?'Resume auto-arranging':'Freeze layout (stop auto-arranging)'; } }
+// Refresh: rescan projects + codebase, fold the changes in, and KEEP every
+// existing node exactly where it is (build3D reuses current positions; only
+// genuinely new nodes get placed and settled).
+let _refreshing=false;
+async function refreshGraph(){
+  const a=api(); if(!a||!a.refresh_graph||_refreshing) return;
+  _refreshing=true; const btn=$('gRefresh');
+  if(btn){ btn.classList.add('spin'); btn.title='Refreshing…'; }
+  try{
+    const r=await a.refresh_graph();
+    if(r && r.triples){
+      G.colors=r.colors||{}; G.layout=r.layout||{};
+      await loadProjectNames();
+      build3D(r.triples);            // existing nodes keep their positions
+      renderDetail(); buildLegend(); syncTools(); startGraphAnim();
+      const n=new Set(r.triples.flatMap(t=>[t.s,t.o])).size;
+      window.patroam.setStatus('graph refreshed · '+r.triples.length+' facts · '+n+' nodes');
+      $('kgMeta').innerHTML='<b>'+r.triples.length+'</b> relationships · <b>'+n+
+        '</b> entities · <span style="opacity:.6">drag a node · right-click · scroll</span>';
+    }
+  }catch(_){ window.patroam.setStatus('graph refresh failed'); }
+  finally{ _refreshing=false;
+    if(btn){ btn.classList.remove('spin'); btn.title='Refresh — rescan projects & files (keeps node positions)'; } }
+}
+$('gRefresh').onclick=(e)=>{ e.stopPropagation(); refreshGraph(); };
 $('gFit').onclick=(e)=>{ e.stopPropagation(); fitView(); };
 $('gFreeze').onclick=(e)=>{ e.stopPropagation(); G.frozen=!G.frozen;
   localStorage.setItem('kg_frozen', G.frozen?'1':'0');
@@ -1392,7 +1472,7 @@ window.patroam.focusFromText=function(text){
   if(!text || !insp.classList.contains('open') || !G.nodes.length) return;
   const n=findNode(text); if(!n) return;
   if(!$('pane-kg').classList.contains('sel')){ const tb=document.querySelector('.tab[data-tab="kg"]'); if(tb) tb.click(); }
-  selectNode(n.id);
+  selectNode(n.id, true);
 };
 // Called when you ASK what PATROAM knows — open the graph fullscreen + focus it.
 window.patroam.exploreFromText=async function(text){
@@ -1403,7 +1483,7 @@ window.patroam.exploreFromText=async function(text){
   $('pane-kg').classList.add('sel');
   await loadGraph();
   setFull(true);
-  const n=findNode(text); if(n) selectNode(n.id);
+  const n=findNode(text); if(n) selectNode(n.id, true);
   loadRag();
 };
 // Shortest path between two nodes (undirected BFS) → highlight the chain.
@@ -1421,9 +1501,9 @@ function pathFind(aId, bId){ const ai=G.nodes.findIndex(n=>n.id===aId), bi=G.nod
 function runSearch(v, enter){ v=(v||'').trim();
   if(v.includes('->')){ if(!enter) return;                       // path only runs on Enter
     const [as,bs]=v.split('->'); const a=findNode(as), b=findNode(bs);
-    if(a&&b){ G.path=pathFind(a.id,b.id); selectNode(a.id); if(!G.path) window.patroam.setStatus('no path between those nodes'); }
+    if(a&&b){ G.path=pathFind(a.id,b.id); selectNode(a.id, true); if(!G.path) window.patroam.setStatus('no path between those nodes'); }
     return; }
-  G.path=null; if(!v){ clearSel(); return; } const n=findNode(v); if(n) selectNode(n.id);
+  G.path=null; if(!v){ clearSel(); return; } const n=findNode(v); if(n) selectNode(n.id, true);
 }
 $('kgSearch').addEventListener('input', e=> runSearch(e.target.value, false));
 $('kgSearch').addEventListener('keydown', e=>{ if(e.key==='Enter') runSearch(e.target.value, true); e.stopPropagation(); });
@@ -1436,10 +1516,14 @@ function renderDetail(){
     if(a===G.sel) out.push({rel:e.rel, other:b});
     if(b===G.sel) inc.push({rel:e.rel, other:a}); });
   const deg=out.length+inc.length;
+  // Every connected entity is clickable: jumps to that node (and opens the
+  // project view when it's one of your projects).
+  const ent=(name)=>'<span class="n'+(isProject(name)?' proj':'')+'" data-node="'
+    +escAttr(name)+'">'+esc(name)+'</span>';
   let html='<div class="detail-title">'+esc(G.sel)+'<span class="detail-clear">✕</span></div>'+
     '<div class="detail-sub">'+deg+' connection'+(deg!==1?'s':'')+'</div><div class="detail-rel">';
-  out.forEach(c=> html+='<b>'+esc(G.sel)+'</b> <span class="r">'+esc(c.rel)+'</span> '+esc(c.other)+'<br>');
-  inc.forEach(c=> html+=esc(c.other)+' <span class="r">'+esc(c.rel)+'</span> <b>'+esc(G.sel)+'</b><br>');
+  out.forEach(c=> html+='<b>'+esc(G.sel)+'</b> <span class="r">'+esc(c.rel)+'</span> '+ent(c.other)+'<br>');
+  inc.forEach(c=> html+=ent(c.other)+' <span class="r">'+esc(c.rel)+'</span> <b>'+esc(G.sel)+'</b><br>');
   if(!deg) html+='No connections recorded yet.';
   html+='</div>'+
     '<div class="detail-actions">'+
@@ -1450,10 +1534,84 @@ function renderDetail(){
     '<input type="color" class="dcolor" value="'+rgbToHex(nodeColor(G.sel))+'"/>'+
     '<span class="dbtn dcreset">Reset</span></div>'+
     '<div class="detail-form"></div>'+
+    '<div class="detail-project"></div>'+
     '<div class="detail-media"></div>';
   dEl.innerHTML=html; oEl.innerHTML=html; oEl.classList.add('show');
   wireDetail(dEl); wireDetail(oEl);
   loadNodeMedia(G.sel);
+  if(isProject(G.sel)) loadProjectView(G.sel);   // selected node IS a project
+}
+
+// ── Projects: which graph nodes get the project view ──────────────────────────
+let _projSet=new Set();
+function isProject(name){ return _projSet.has(canon(name)); }
+async function loadProjectNames(){ if(!api()||!api().get_project_names) return;
+  try{ const r=await api().get_project_names();
+    _projSet=new Set(((r&&r.names)||[]).map(canon)); }catch(_){} }
+
+// ── Project view: git state + recent commits + live ClickUp tasks ─────────────
+async function loadProjectView(name){
+  if(!api()||!api().get_project_view) return;
+  const holders=()=>['kgDetail','kgOverlay'].map(id=>{ const el=$(id);
+    return el && G.sel===name ? el.querySelector('.detail-project') : null; }).filter(Boolean);
+  holders().forEach(h=>h.innerHTML='<div class="pv"><div class="pv-empty">Loading project…</div></div>');
+  let v; try{ v=await api().get_project_view(name); }catch(e){ v=null; }
+  if(!v || G.sel!==name) return;
+  if(!v.found){ holders().forEach(h=>h.innerHTML=''); return; }
+  const g=v.git||{}, cs=v.commits||[], tk=v.tasks||{}, ct=(tk.counts)||{};
+  let h='<div class="pv"><div class="pv-head"><div>'+
+    '<div class="pv-title">'+esc(v.name)+'</div>'+
+    (v.folder?'<div class="pv-path">'+esc(v.folder)+'</div>':'')+'</div>'+
+    (v.folder?'<span class="dbtn" data-openpath="'+escAttr(v.folder)+'">Open</span>':'')+'</div>';
+  // progress bar from the ClickUp counts
+  if(ct.total){ const pct=Math.round((ct.done/ct.total)*100);
+    h+='<div class="pv-row" style="margin-top:8px"><span class="k">Progress</span>'+
+       '<span>'+ct.done+'/'+ct.total+' tasks · '+pct+'%</span></div>'+
+       '<div class="pv-bar"><i style="width:'+pct+'%"></i></div>'; }
+  // tech stack + languages (panel only — deliberately not on the graph)
+  const cd=v.code||{}, st=cd.stack||[], lg=Object.keys(cd.languages||{});
+  if(st.length||lg.length){ h+='<div class="pv-sec">Tech stack</div><div class="pv-tags">';
+    lg.slice(0,3).forEach(l=>{ h+='<span class="pv-tag lang">'+esc(l)+'</span>'; });
+    st.forEach(t=>{ h+='<span class="pv-tag">'+esc(t)+'</span>'; });
+    h+='</div>'; }
+  if((cd.entry_points||[]).length){ h+='<div class="pv-row" style="margin-top:7px">'+
+    '<span class="k">run</span><span>'+cd.entry_points.map(esc).join(' · ')+'</span></div>'; }
+  // structure
+  const dirs=cd.structure||[];
+  if(dirs.length){ h+='<div class="pv-sec">Structure'+(cd.files?' · '+cd.files+' source files':'')+'</div>';
+    dirs.slice(0,6).forEach(d=>{ h+='<div class="pv-f" data-open="'+escAttr((v.folder||'')+'\\'+d.name)+'">'+
+      '<span class="ic">▸</span><span>'+esc(d.name)+'</span><span class="sz">'+d.files+'</span></div>'; }); }
+  // key files
+  const kf=cd.key_files||[];
+  if(kf.length){ h+='<div class="pv-sec">Key files</div>';
+    kf.slice(0,6).forEach(f=>{ h+='<div class="pv-f" data-open="'+escAttr((v.folder||'')+'\\'+f.name.replace(/\//g,'\\'))+'">'+
+      '<span class="ic">▪</span><span>'+esc(f.name)+'</span>'+
+      (f.size?'<span class="sz">'+(f.size>1024?Math.round(f.size/1024)+'kb':f.size+'b')+'</span>':'')+'</div>'; }); }
+  // git
+  if(g.branch||g.last_commit){ h+='<div class="pv-sec">Git</div>'+
+    '<div class="pv-row"><span class="k">branch</span><span>'+esc(g.branch||'—')+
+    (g.dirty?' · <b>'+g.dirty+'</b> uncommitted':'')+'</span></div>'; }
+  if(cs.length){ h+='<div class="pv-sec">Recent commits</div>';
+    cs.slice(0,6).forEach(c=>{ h+='<div class="pv-c"><span class="h">'+esc(c.hash)+'</span> '+
+      esc(c.subject)+' <span class="h">· '+esc(c.when)+'</span></div>'; }); }
+  // ClickUp
+  const open=tk.open||[], done=tk.done||[];
+  if(open.length||done.length){
+    if(open.length){ h+='<div class="pv-sec">Ongoing · ClickUp ('+(ct.open||open.length)+')</div>';
+      open.slice(0,6).forEach(t=>{ h+='<div class="pv-t open"><span class="m">○</span>'+
+        '<span class="nm">'+esc(t.name)+'</span>'+(t.status?'<span class="st">'+esc(t.status)+'</span>':'')+'</div>'; }); }
+    if(done.length){ h+='<div class="pv-sec">Recently completed</div>';
+      done.slice(0,5).forEach(t=>{ h+='<div class="pv-t done"><span class="m">✓</span>'+
+        '<span class="nm">'+esc(t.name)+'</span></div>'; }); }
+  } else if(v.folder){ h+='<div class="pv-sec">ClickUp</div>'+
+    '<div class="pv-empty">No ClickUp list linked to this project.</div>'; }
+  h+='</div>';
+  holders().forEach(el=>{ el.innerHTML=h;
+    const b=el.querySelector('[data-openpath]');
+    if(b) b.onclick=()=>{ const a=api(); if(a&&a.open_path) a.open_path(b.dataset.openpath); };
+    // Click any folder / key file to open it on disk.
+    el.querySelectorAll('[data-open]').forEach(row=>{ row.onclick=()=>{
+      const a=api(); if(a&&a.open_path) a.open_path(row.dataset.open); }; }); });
 }
 
 // Fetch the documents a node came from + their images, and render them.
@@ -1475,6 +1633,10 @@ function escAttr(s){ return esc(s).replace(/"/g,'&quot;'); }
 // Wire the edit buttons (rename / add link / delete) inside a detail container.
 function wireDetail(el){
   const clr=el.querySelector('.detail-clear'); if(clr) clr.onclick=clearSel;
+  // Click a connected entity's name → select that node (and focus it in the graph).
+  el.querySelectorAll('.detail-rel .n').forEach(sp=>{ sp.onclick=(ev)=>{
+    ev.stopPropagation(); const id=sp.dataset.node;
+    if(G.byId[id]) selectNode(id); else { const n=findNode(id); if(n) selectNode(n.id); } }; });
   // Node colour picker — live + persisted.
   const cin=el.querySelector('.dcolor');
   if(cin) cin.oninput=()=>{ const hex=cin.value, id=G.sel; G.colors[canon(id)]=hex;
@@ -1512,6 +1674,7 @@ async function loadGraph(){ if(!api())return;
   const r=await api().get_graph(), tr=(r&&r.triples)||[];
   G.colors=(r&&r.colors)||{};                 // custom node colours (persisted)
   G.layout=(r&&r.layout)||{};                 // saved node positions (persisted)
+  await loadProjectNames();                   // which nodes open the project view
   try{ _kgSig=_sigOf(tr); }catch(_){}         // keep the change-poll in sync
   build3D(tr);
   // Self-heal: if the restored layout is piled up (overlapping nodes — e.g. saved

@@ -1,9 +1,10 @@
-"""PATROAM's WebGL window.
+"""PATROAM's desktop window.
 
-Hosts the Three.js orb (web/index.html) in a native pywebview window and wires
-it to the agent. Python pushes state to the page (window.patroam.setState/...);
-the page calls back into Python (send text, toggle always-on, push-to-talk,
-choose model) through pywebview's JS API.
+Hosts the Canvas2D orb + knowledge graph (web/index.html) in a native pywebview
+window and wires it to the agent. No WebGL and no JS libraries — everything is
+drawn with plain Canvas2D so it works offline. Python pushes state to the page
+(window.patroam.setState/...); the page calls back into Python (send text,
+toggle always-on, push-to-talk, choose model) through pywebview's JS API.
 """
 
 import json
@@ -179,9 +180,14 @@ class Controller:
                 # and re-extracting everything from scratch.
                 graph._CACHE = None
             was_empty = not graph.all_triples()
-            # Always keep the Projects node = real GitHub repos + ClickUp lists.
+            # Always keep the Projects node = real GitHub repos + ClickUp lists,
+            # and each project's structure (modules + key files) current.
             try:
                 graph.sync_projects()
+            except Exception:
+                pass
+            try:
+                graph.index_codebase()
             except Exception:
                 pass
             if not was_empty:
@@ -897,6 +903,43 @@ class JsApi:
             return {"ok": bool(graph.set_color(name, color))}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    def refresh_graph(self):
+        """Re-scan the real world and update the graph: projects (GitHub repos +
+        ClickUp lists) and each project's structure. Saved node positions are left
+        untouched, so the layout you arranged survives — only genuinely new nodes
+        need placing. Returns the fresh graph payload."""
+        try:
+            graph.sync_projects()
+        except Exception:
+            pass
+        added = 0
+        try:
+            added = graph.index_codebase() or 0
+        except Exception:
+            pass
+        try:
+            return {"ok": True, "added": added, "triples": graph.all_triples(),
+                    "colors": graph.get_colors(), "layout": graph.get_layout()}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def get_project_names(self):
+        """Names linked under the graph's Projects node — so the UI knows which
+        graph nodes should open the project view."""
+        try:
+            return {"names": graph.projects()}
+        except Exception as e:
+            return {"names": [], "error": str(e)}
+
+    def get_project_view(self, name):
+        """Live project panel data: folder, git state, recent commits, and ClickUp
+        tasks (open + recently completed)."""
+        try:
+            from .. import manage
+            return manage.project_view(name)
+        except Exception as e:
+            return {"name": name, "found": False, "error": str(e)}
 
     def graph_save_layout(self, positions):
         """Persist node positions the user arranged in the graph, so the layout
