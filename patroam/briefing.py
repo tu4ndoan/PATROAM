@@ -109,6 +109,17 @@ def _clickup(prev):
     return s
 
 
+def _calendar():
+    """Today's remaining events — so the briefing knows what the day holds."""
+    try:
+        from . import gcal
+        if not gcal.available():
+            return []
+        return gcal.list_events(days=1, limit=8)
+    except Exception:
+        return []
+
+
 def _feedback(limit=15):
     """Recent messages from the configured Slack customer-feedback channel."""
     if not config.SLACK_FEEDBACK_CHANNEL:
@@ -128,7 +139,8 @@ def _feedback(limit=15):
 def _executive_summary(facts):
     """A short spoken narrative (layer A). LLM-composed, with a deterministic fallback."""
     lead = config.time_greeting()
-    if llm.available():
+    write = llm.complete if llm.available() else None
+    if write:
         prompt = (
             "You are PATROAM, the user's Chief of Staff. Write a SHORT spoken executive "
             "briefing — 4 to 7 sentences, plain prose, NO markdown, NO bullets, NO headers. "
@@ -139,11 +151,16 @@ def _executive_summary(facts):
             "'recommended focus' sentence. Be concise and action-oriented. Do NOT add "
             "any greeting (no 'hello', no 'welcome back') — start directly with the substance. "
             "Facts (JSON):\n" + json.dumps(facts, ensure_ascii=False)[:4500])
-        out = llm.complete(prompt, timeout=45)
+        out = write(prompt, timeout=45)
         if out and out.strip():
             return lead + " " + out.strip()
     # Fallback: stitch a summary from the facts.
     bits = [lead]
+    cal = facts.get("calendar") or []
+    if cal:
+        nxt = cal[0]
+        bits.append(f"You have {len(cal)} event" + ("s" if len(cal) != 1 else "")
+                    + f" today; next is {nxt['title']} at {nxt['when'].split('· ')[-1]}.")
     fb = facts.get("fab")
     if fb and fb.get("delta_sales"):
         bits.append(f"Since last session your Fab sales changed by ${fb['delta_sales']:+,.2f}, "
@@ -169,6 +186,11 @@ def _executive_summary(facts):
 def _dashboard(facts):
     """The structured, chat-only overview (layer B)."""
     L = ["━━━━━━━━━━━━━━", "Daily Briefing", "━━━━━━━━━━━━━━", ""]
+    cal = facts.get("calendar") or []
+    if cal:
+        L += ["📅 TODAY'S SCHEDULE"] + [
+            f"• {e['when']} — {e['title']}" + (f" ({e['location']})" if e.get("location") else "")
+            for e in cal] + [""]
     pr = facts.get("projects") or []
     cu = facts.get("clickup")
     # Priorities: ClickUp in-progress tasks first, then project next steps.
@@ -227,14 +249,27 @@ def _opening():
 def gather():
     """Assemble the 3-layer briefing → {say, show, offer}, or None if nothing to report."""
     prev = _load_session()
-    facts = {
-        "fab": _fab(prev),
-        "projects": _projects(),
-        "clickup": _clickup(prev),
-        "notes": _notes(),
-        "news": _news(),
-        "feedback": _feedback(),
+    # Seven independent network round-trips. Sequentially they took ~10 s and the
+    # briefing felt like a hang on startup; they don't depend on each other, so
+    # fetch them at once and wait for the slowest.
+    from concurrent.futures import ThreadPoolExecutor
+    jobs = {
+        "fab": lambda: _fab(prev),
+        "projects": _projects,
+        "clickup": lambda: _clickup(prev),
+        "notes": _notes,
+        "news": _news,
+        "feedback": _feedback,
+        "calendar": _calendar,
     }
+    facts = {}
+    with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
+        futures = {k: ex.submit(fn) for k, fn in jobs.items()}
+        for k, fut in futures.items():
+            try:
+                facts[k] = fut.result(timeout=25)
+            except Exception:
+                facts[k] = None
     # Snapshot for next session's deltas.
     snap = {"ts": datetime.datetime.now().isoformat()}
     if facts["fab"]:

@@ -168,10 +168,15 @@
     z-index:31; pointer-events:none; font-size:11px; color:rgba(180,190,230,.7);
     text-shadow:0 0 8px rgba(0,0,0,.8); }
   .graphwrap.full .ghint { display:block; }
+  /* Node / project detail. Slides in from the left like every other left-edge
+     surface, instead of appearing all at once. */
   .kg-overlay { display:none; position:absolute; left:14px; bottom:14px; z-index:31;
     width:300px; max-height:62%; overflow:auto; padding:12px 14px; border-radius:12px;
     background:rgba(10,8,18,.85); border:1px solid rgba(123,92,255,.3); backdrop-filter:blur(10px); }
-  .graphwrap.full .kg-overlay.show { display:block; }
+  .graphwrap.full .kg-overlay { display:block; opacity:0; pointer-events:none;
+    transform:translateX(calc(-100% - 24px));
+    transition:transform .5s cubic-bezier(.22,1,.36,1), opacity .3s ease; }
+  .graphwrap.full .kg-overlay.show { opacity:1; pointer-events:auto; transform:translateX(0); }
   .kg-detail:empty { display:none; }
   .kg-detail { padding:10px 12px; border-radius:10px; background:rgba(20,16,34,.45);
     border:1px solid rgba(123,92,255,.2); }
@@ -332,11 +337,13 @@
   .gtool.on { border-color:var(--accent); color:#fff; background:var(--hover); }
   .gtool.spin { animation:kgspin .9s linear infinite; pointer-events:none; opacity:.75; }
   @keyframes kgspin { to { transform:rotate(360deg); } }
-  .kg-legend { display:none; position:absolute; top:44px; right:8px; z-index:31; width:196px;
+  .kg-legend { display:block; position:absolute; top:44px; right:8px; z-index:31; width:196px;
     max-height:52%; overflow:auto; padding:9px 11px; border-radius:10px;
     background:rgba(10,10,10,.93); border:1px solid var(--border); backdrop-filter:blur(10px);
-    font-family:"Segoe UI", system-ui, sans-serif; }
-  .kg-legend.show { display:block; }
+    font-family:"Segoe UI", system-ui, sans-serif;
+    opacity:0; pointer-events:none; transform:translateX(calc(100% + 16px));
+    transition:transform .45s cubic-bezier(.22,1,.36,1), opacity .3s ease; }
+  .kg-legend.show { opacity:1; pointer-events:auto; transform:translateX(0); }
   .graphwrap.full .kg-legend { top:94px; right:14px; }
   .kg-legend .lgt { font-size:10px; letter-spacing:.12em; color:var(--muted2);
     text-transform:uppercase; margin-bottom:6px; }
@@ -391,6 +398,244 @@
   ::-webkit-scrollbar-thumb { background:var(--border); border-radius:999px; border:2px solid #0a0a0a; }
   ::-webkit-scrollbar-thumb:hover { background:var(--muted2); }
   ::selection { background:var(--accent); color:#0a0a0a; }
+
+  /* ── Realtime voice pill ──────────────────────────────────────────────────── */
+  .rt { position:fixed; left:50%; bottom:90px; transform:translateX(-50%) translateY(14px);
+    z-index:46; display:none; align-items:center; gap:10px; padding:8px 16px;
+    border-radius:999px; background:rgba(17,17,17,.82); border:1px solid var(--border);
+    backdrop-filter:blur(12px); font-family:"Segoe UI", system-ui, sans-serif;
+    font-size:12px; color:var(--muted); opacity:0;
+    transition:opacity .3s ease, transform .3s cubic-bezier(.22,1,.36,1); }
+  .rt.on { display:flex; opacity:1; transform:translateX(-50%) translateY(0); }
+  body.resting .rt { opacity:0; transform:translateX(-50%) translateY(14px); }
+  .rt .orbit { width:9px; height:9px; border-radius:50%; background:var(--muted2); flex:none; }
+  .rt.listening .orbit { background:#8fd0ff; box-shadow:0 0 10px rgba(143,208,255,.8);
+    animation:rtpulse 1.4s ease-in-out infinite; }
+  .rt.thinking  .orbit { background:#ffcf7a; box-shadow:0 0 10px rgba(255,207,122,.8);
+    animation:kgspin 1s linear infinite; }
+  .rt.speaking  .orbit { background:#7ede9f; box-shadow:0 0 10px rgba(126,222,159,.8);
+    animation:rtpulse .7s ease-in-out infinite; }
+  .rt.reconnecting .orbit { background:#ff9a9a; animation:rtpulse .5s ease-in-out infinite; }
+  @keyframes rtpulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.5);opacity:.55} }
+  .rt .lbl { color:var(--fg); letter-spacing:.02em; white-space:nowrap; }
+  .rt .tool { color:var(--muted2); font-family:var(--font-mono); font-size:10.5px;
+    max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rtsel { background:rgba(10,10,10,.7); border:1px solid var(--border); color:var(--muted);
+    border-radius:6px; font-family:inherit; font-size:10.5px; padding:3px 5px; outline:none;
+    max-width:132px; cursor:pointer; }
+  .rtsel:hover { color:var(--fg); border-color:var(--accent); }
+  .rt .x { cursor:pointer; opacity:.5; padding-left:6px; }
+  .rt .x:hover { opacity:1; color:#ff9a9a; }
+  #rtToggle.live { color:#7ede9f; border-color:rgba(126,222,159,.5); }
+
+  /* ── Calendar panel — same left edge, same rules as TODO ─────────────────── */
+  .cal { position:fixed; top:44px; left:0; height:calc(100% - 44px); width:380px; max-width:88vw;
+    background:rgba(10,10,10,.82); border-right:1px solid var(--border);
+    backdrop-filter:blur(14px); transform:translateX(-101%);
+    transition:transform .55s cubic-bezier(.22,1,.36,1);
+    display:flex; flex-direction:column; z-index:7;
+    font-family:"Segoe UI", system-ui, sans-serif; }
+  .cal.open { transform:translateX(0); }
+  body.resting .cal { transform:translateX(-101%); }
+  .cal-list { flex:1; overflow-y:auto; padding:4px 10px 16px; }
+  .cday { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted2);
+    padding:13px 4px 5px; position:sticky; top:0; background:rgba(10,10,10,.94); }
+  .cday.today { color:#8fd0ff; }
+  .cev { display:flex; gap:9px; padding:7px 6px; border-radius:8px; font-size:12.5px;
+    color:var(--fg); line-height:1.45; }
+  .cev:hover { background:rgba(255,255,255,.05); }
+  .cev.sel, .titem.sel { background:rgba(255,255,255,.07); }
+  .cev .t { flex:none; width:44px; color:var(--muted2); font-family:var(--font-mono);
+    font-size:11px; padding-top:1px; }
+  .cev .bar { flex:none; width:2px; border-radius:2px; background:#8fd0ff; opacity:.7; }
+  .cev.allday .bar { background:#ffcf7a; }
+  .cev .b { flex:1; min-width:0; }
+  .cev .nm { word-break:break-word; }
+  .cev .meta { font-size:10.5px; color:var(--muted2); margin-top:1px; }
+  .cev .del { flex:none; cursor:pointer; opacity:0; color:var(--muted2); font-size:12px; padding:0 3px; }
+  .cev:hover .del { opacity:.65; }
+  .cev .del:hover { opacity:1; color:#ff9a9a; }
+
+  /* ── Notes panel — same left edge, same rules ─────────────────────────────── */
+  .notes { position:fixed; top:44px; left:0; height:calc(100% - 44px); width:380px; max-width:88vw;
+    background:rgba(10,10,10,.82); border-right:1px solid var(--border);
+    backdrop-filter:blur(14px); transform:translateX(-101%);
+    transition:transform .55s cubic-bezier(.22,1,.36,1);
+    display:flex; flex-direction:column; z-index:7;
+    font-family:"Segoe UI", system-ui, sans-serif; }
+  .notes.open { transform:translateX(0); }
+  body.resting .notes { transform:translateX(-101%); }
+  .notes-list { flex:1; overflow-y:auto; padding:4px 10px 16px; }
+  .nitem { padding:9px 8px; border-radius:8px; font-size:12.5px; line-height:1.5; cursor:pointer; }
+  .nitem:hover { background:rgba(255,255,255,.05); }
+  .nitem.sel { background:rgba(255,255,255,.07); }
+  .nitem .row { display:flex; align-items:baseline; gap:8px; }
+  .nitem .nm { flex:1; min-width:0; color:var(--fg); word-break:break-word; }
+  .nitem .when { flex:none; font-size:10px; color:var(--muted2); font-family:var(--font-mono); }
+  .nitem .del { flex:none; cursor:pointer; opacity:0; color:var(--muted2); font-size:11px; padding:0 3px; }
+  .nitem:hover .del { opacity:.65; }
+  .nitem .del:hover { opacity:1; color:#ff9a9a; }
+  .nitem .pv2 { font-size:11px; color:var(--muted2); margin-top:2px; word-break:break-word; }
+  .nitem textarea { width:100%; margin-top:7px; min-height:120px; resize:vertical;
+    font-size:12px; line-height:1.55; padding:8px 9px; background:#0a0a0a;
+    border:1px solid var(--border); color:var(--fg); border-radius:8px;
+    font-family:inherit; outline:none; }
+  .nitem textarea:focus { border-color:var(--accent); }
+
+  /* Detail blocks that open inside a list row (calendar event, task, note) */
+  .rdet { margin:6px 0 2px 15px; padding:8px 10px; border-left:2px solid var(--border);
+    font-size:11.5px; color:var(--muted); line-height:1.6; flex:1 0 100%; }
+  .rdet .k { color:var(--muted2); display:inline-block; min-width:64px; }
+  .rdet .desc { margin-top:5px; color:var(--muted); white-space:pre-wrap; word-break:break-word;
+    max-height:150px; overflow:auto; }
+  .rdet .acts { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .rdet .b { cursor:pointer; font-size:10.5px; padding:3px 9px; border-radius:6px;
+    border:1px solid var(--border); color:var(--muted); }
+  .rdet .b:hover { color:var(--fg); border-color:var(--fg); }
+  .rdet .b.danger:hover { color:#ff9a9a; border-color:rgba(255,120,120,.5); }
+
+  /* ── Connectors panel (MCP) — same left edge, same rules ──────────────────── */
+  .mcp { position:fixed; top:44px; left:0; height:calc(100% - 44px); width:380px; max-width:88vw;
+    background:rgba(10,10,10,.82); border-right:1px solid var(--border);
+    backdrop-filter:blur(14px); transform:translateX(-101%);
+    transition:transform .55s cubic-bezier(.22,1,.36,1);
+    display:flex; flex-direction:column; z-index:7;
+    font-family:"Segoe UI", system-ui, sans-serif; }
+  .mcp.open { transform:translateX(0); }
+  body.resting .mcp { transform:translateX(-101%); }
+  .mcp-list { flex:1; overflow-y:auto; padding:6px 10px 10px; }
+  .msrv { padding:9px 8px; border-radius:8px; font-size:12.5px; line-height:1.45; }
+  .msrv:hover { background:rgba(255,255,255,.05); }
+  .msrv .row { display:flex; align-items:center; gap:8px; }
+  .msrv .dot { flex:none; width:7px; height:7px; border-radius:50%; background:var(--muted2); }
+  .msrv.ready  .dot { background:#7ede9f; }
+  .msrv.error  .dot { background:#ff9a9a; }
+  .msrv.connecting .dot { background:#ffcf7a; animation:mpulse 1s infinite; }
+  @keyframes mpulse { 50% { opacity:.25; } }
+  .msrv .nm { flex:1; min-width:0; word-break:break-word; }
+  .msrv .act { flex:none; cursor:pointer; opacity:0; color:var(--muted2); font-size:11px;
+    padding:0 3px; }
+  .msrv:hover .act { opacity:.7; }
+  .msrv .act:hover { opacity:1; color:var(--fg); }
+  .msrv .act.rm:hover { color:#ff9a9a; }
+  .msrv .meta { font-size:10.5px; color:var(--muted2); margin:2px 0 0 15px; word-break:break-all; }
+  .msrv .meta.bad { color:#ff9a9a; }
+  .mcp-add { border-top:1px solid var(--border); padding:10px 12px 12px; }
+  .mcp-cat { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:9px; }
+  .mcp-cat .c { font-size:10.5px; padding:3px 9px; border-radius:20px; cursor:pointer;
+    border:1px solid var(--border); color:var(--muted); }
+  .mcp-cat .c:hover { color:var(--fg); border-color:var(--fg); }
+  .mcp-cat .c.added { opacity:.35; }
+  .mcp-form { display:flex; flex-wrap:wrap; gap:6px; }
+  .mcp-form input, .mcp-form select { font-size:12px; padding:7px 9px; background:#0a0a0a;
+    border:1px solid var(--border); color:var(--fg); border-radius:8px;
+    font-family:inherit; outline:none; min-width:0; flex:1; }
+  .mcp-form input.wide { flex:1 0 100%; }
+  .mcp-form input:focus, .mcp-form select:focus { border-color:var(--accent); }
+  .mcp-actions { flex:1 0 100%; display:flex; align-items:center; justify-content:space-between;
+    gap:8px; margin-top:2px; }
+  .mcp-hint { font-size:10.5px; color:var(--muted2); flex:1; min-width:0; }
+  .mcp-btn { cursor:pointer; padding:7px 12px; border-radius:8px; font-size:11.5px; font-weight:600;
+    background:var(--fg); color:#0a0a0a; white-space:nowrap; }
+  .mcp-btn.busy { opacity:.5; pointer-events:none; }
+
+  /* ── TODO panel (Google Tasks) — slides in from the left ──────────────────── */
+  .todo { position:fixed; top:44px; left:0; height:calc(100% - 44px); width:380px; max-width:88vw;
+    background:rgba(10,10,10,.82); border-right:1px solid var(--border);
+    backdrop-filter:blur(14px); transform:translateX(-101%);
+    transition:transform .55s cubic-bezier(.22,1,.36,1);
+    display:flex; flex-direction:column; z-index:7;
+    font-family:"Segoe UI", system-ui, sans-serif; }
+  .todo.open { transform:translateX(0); }
+  body.resting .todo { transform:translateX(-101%); }
+  .todo-head { padding:14px 16px 10px; display:flex; align-items:center; justify-content:space-between;
+    border-bottom:1px solid var(--border); }
+  .todo-title { font-family:var(--font-display); letter-spacing:.16em; color:var(--fg); font-size:13px; }
+  .todo-head .x { cursor:pointer; opacity:.6; font-size:13px; }
+  .todo-head .x:hover { opacity:1; }
+  .todo-stats { display:flex; gap:6px; padding:9px 14px 0; flex-wrap:wrap; }
+  .tstat { font-size:10.5px; padding:2px 8px; border-radius:20px; border:1px solid var(--border);
+    color:var(--muted); }
+  .tstat.over { color:#ff9a9a; border-color:rgba(255,120,120,.4); }
+  .tstat.today { color:#8fd0ff; border-color:rgba(143,208,255,.4); }
+  .todo-new { display:flex; gap:6px; padding:11px 14px; }
+  .todo-new input { flex:1; min-width:0; font-size:12.5px; padding:8px 10px;
+    background:#0a0a0a; border:1px solid var(--border); color:var(--fg); border-radius:8px;
+    font-family:inherit; outline:none; }
+  .todo-new input:focus { border-color:var(--accent); }
+  .todo-new input.due { flex:0 0 96px; }
+  .todo-new .addb { cursor:pointer; padding:8px 12px; border-radius:8px; border:1px solid var(--border);
+    background:var(--fg); color:#0a0a0a; font-weight:700; font-size:12px; }
+  .todo-list { flex:1; overflow-y:auto; padding:4px 10px 16px; }
+  .tsec { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted2);
+    padding:12px 4px 5px; }
+  .titem { display:flex; flex-wrap:wrap; align-items:flex-start; gap:9px; padding:8px 6px;
+    border-radius:8px; font-size:12.5px; color:var(--fg); line-height:1.45; }
+  .titem:hover { background:rgba(255,255,255,.05); }
+  .titem .box { flex:none; width:15px; height:15px; margin-top:1px; border-radius:4px; cursor:pointer;
+    border:1.5px solid var(--muted2); display:flex; align-items:center; justify-content:center;
+    font-size:10px; color:transparent; transition:.12s; }
+  .titem .box:hover { border-color:var(--fg); }
+  .titem.done .box { background:#7ede9f; border-color:#7ede9f; color:#0a0a0a; }
+  .titem .tx { flex:1; min-width:0; cursor:text; word-break:break-word; }
+  .titem.done .tx { text-decoration:line-through; color:var(--muted2); }
+  .titem .due { font-size:10.5px; color:var(--muted2); white-space:nowrap; margin-top:1px; }
+  .titem .due.over { color:#ff9a9a; }
+  .titem .due.today { color:#8fd0ff; }
+  .titem .pri { flex:none; font-size:10px; color:#ffcf7a; margin-top:2px; }
+  .titem .del { flex:none; cursor:pointer; opacity:0; color:var(--muted2); font-size:12px; padding:0 3px; }
+  .titem:hover .del { opacity:.65; }
+  .titem .del:hover { opacity:1; color:#ff9a9a; }
+  .todo-empty { text-align:center; color:var(--muted2); font-size:12px; padding:26px 10px; }
+  .todo-err { margin:10px 14px; padding:9px 11px; border-radius:8px; font-size:11.5px;
+    color:#ffb4b4; background:rgba(255,120,120,.08); border:1px solid rgba(255,120,120,.28);
+    white-space:pre-wrap; }
+  .todo-foot { padding:8px 14px; border-top:1px solid var(--border); font-size:10.5px;
+    color:var(--muted2); display:flex; justify-content:space-between; }
+  .todo-foot span { cursor:pointer; }
+  .todo-foot span:hover { color:var(--fg); }
+
+  /* ── Automations (n8n) — fills the PATROAM window, no browser chrome ─────── */
+  /* Automations fills the workspace, and slides in from the left like the
+     panels rather than snapping into existence. */
+  .auto { position:fixed; top:44px; left:0; right:0; bottom:0; z-index:8;
+    background:#0a0a0a; display:flex; flex-direction:column;
+    transform:translateX(-101%); pointer-events:none;
+    transition:transform .55s cubic-bezier(.22,1,.36,1); }
+  .auto.open { transform:translateX(0); pointer-events:auto; }
+  body.resting .auto { transform:translateX(-101%); }
+  .auto-bar { display:flex; align-items:center; gap:9px; padding:7px 12px;
+    border-bottom:1px solid var(--border); background:rgba(17,17,17,.9); }
+  .auto-bar .t { font-family:var(--font-display); letter-spacing:.14em; font-size:12px;
+    color:var(--fg); }
+  .auto-bar .dot { width:7px; height:7px; border-radius:50%; background:var(--muted2); flex:none; }
+  .auto-bar .dot.up { background:#7ede9f; box-shadow:0 0 7px rgba(126,222,159,.7); }
+  .auto-bar .dot.busy { background:#ffcf7a; animation:kgspin 1.2s linear infinite; }
+  .auto-bar .dot.bad { background:#ff8080; }
+  .auto-bar .msg { font-size:11px; color:var(--muted2); flex:1; min-width:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    font-family:"Segoe UI", system-ui, sans-serif; }
+  .auto-bar .b { cursor:pointer; font-size:11px; padding:4px 9px; border-radius:6px;
+    border:1px solid var(--border); color:var(--fg); background:var(--surface); white-space:nowrap; }
+  .auto-bar .b:hover { border-color:var(--accent); }
+  .auto-frame { flex:1; border:0; width:100%; background:#0a0a0a; }
+  .auto-msg { flex:1; display:flex; align-items:center; justify-content:center;
+    padding:30px; text-align:center; color:var(--muted); font-size:13px; line-height:1.7;
+    font-family:"Segoe UI", system-ui, sans-serif; white-space:pre-wrap; }
+  .auto-msg code { color:var(--fg); background:var(--surface); padding:2px 7px;
+    border-radius:5px; border:1px solid var(--border); font-family:var(--font-mono); }
+
+  /* Pending new-node approvals */
+  .kg-pending { display:none; margin:0 0 8px; padding:10px 12px; border-radius:10px;
+    background:rgba(255,207,122,.07); border:1px solid rgba(255,207,122,.32);
+    font-family:"Segoe UI", system-ui, sans-serif; }
+  .kg-pending.show { display:block; }
+  .kgp-t { font-size:11px; letter-spacing:.06em; color:#ffcf7a; margin-bottom:6px; }
+  .kgp-f { font-size:11.5px; color:var(--muted); line-height:1.6; }
+  .kgp-f b { color:var(--fg); }
+  .kgp-btns { display:flex; gap:6px; margin-top:9px; }
+  .graphwrap.full .kg-pending { position:absolute; left:14px; bottom:14px; width:320px;
+    z-index:32; background:rgba(14,12,8,.94); backdrop-filter:blur(10px); }
 
   /* Clickable entity names inside the node detail panel */
   .detail-rel .n { cursor:pointer; color:var(--fg); border-bottom:1px dotted var(--muted2); }
@@ -454,6 +699,11 @@
         <img src="monogram.svg" class="logo" alt="T" /><span class="tb-brand">PATROAM</span>
       </div>
       <div class="tb-right">
+        <span id="rtToggle" class="glass iconbtn" title="Realtime voice — nói chuyện tự nhiên">◉</span>
+        <span id="autoToggle" class="glass iconbtn" title="Automations (n8n)">⚙</span>
+        <span id="mcpToggle" class="glass iconbtn" title="Connectors (MCP)">⧉</span>
+        <span id="calToggle" class="glass iconbtn" title="Calendar">▦</span>
+        <span id="todoToggle" class="glass iconbtn" title="TODO — your Google Tasks">☑</span>
         <span id="inspToggle" class="glass iconbtn" title="RAG &amp; knowledge graph inspector">◈</span>
         <span id="noteToggle" class="glass iconbtn" title="New note">✎</span>
         <span id="chatToggle" class="glass iconbtn" title="Show/hide chat">▣</span>
@@ -463,6 +713,107 @@
         <span id="winMin" class="wctl" title="Minimize">–</span>
         <span id="winMax" class="wctl" title="Maximize / restore">▢</span>
         <span id="winClose" class="wctl close" title="Close">✕</span>
+      </div>
+    </div>
+
+    <div id="auto" class="auto">
+      <div class="auto-bar">
+        <span class="dot" id="autoDot"></span>
+        <span class="t">AUTOMATIONS</span>
+        <span class="msg" id="autoMsg">…</span>
+        <span class="b" id="autoReload" title="Reload the editor">⟳</span>
+        <span class="b" id="autoWindow" title="Open in its own PATROAM window">⧉ Window</span>
+        <span class="b" id="autoClose">✕ Close</span>
+      </div>
+      <div class="auto-msg" id="autoInfo">Starting n8n…</div>
+      <iframe id="autoFrame" class="auto-frame" style="display:none"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"></iframe>
+    </div>
+
+    <div id="cal" class="cal">
+      <div class="todo-head">
+        <span class="todo-title">▦ CALENDAR</span>
+        <span><span id="calRefresh" class="x" title="Refresh">⟳</span>
+              &nbsp;<span class="x" id="calClose" title="Close">✕</span></span>
+      </div>
+      <div class="todo-stats" id="calStats"></div>
+      <div class="todo-new">
+        <input id="calText" placeholder="New event…" />
+        <input id="calWhen" class="due" placeholder="when…" />
+        <span class="addb" id="calAdd">＋</span>
+      </div>
+      <div class="cal-list" id="calList"><div class="todo-empty">Loading…</div></div>
+      <div class="todo-foot">
+        <span id="calRange">Next 14 days</span>
+        <span id="calOpenGoogle">Open Google Calendar ↗</span>
+      </div>
+    </div>
+
+    <div id="notes" class="notes">
+      <div class="todo-head">
+        <span class="todo-title">✎ NOTES</span>
+        <span><span id="notesRefresh" class="x" title="Refresh">⟳</span>
+              &nbsp;<span class="x" id="notesClose" title="Close">✕</span></span>
+      </div>
+      <div class="todo-stats" id="notesStats"></div>
+      <div class="todo-new">
+        <input id="noteText" placeholder="Write a note…" />
+        <span class="addb" id="noteAdd">＋</span>
+      </div>
+      <div class="notes-list" id="notesList"><div class="todo-empty">Loading…</div></div>
+      <div class="todo-foot">
+        <span id="notesReview">Review my notes</span>
+        <span id="notesOpenFolder">Open folder ↗</span>
+      </div>
+    </div>
+
+    <div id="mcp" class="mcp">
+      <div class="todo-head">
+        <span class="todo-title">⧉ CONNECTORS</span>
+        <span><span id="mcpRefresh" class="x" title="Refresh">⟳</span>
+              &nbsp;<span class="x" id="mcpClose" title="Close">✕</span></span>
+      </div>
+      <div class="todo-stats" id="mcpStats"></div>
+      <div class="mcp-list" id="mcpList"><div class="todo-empty">Loading…</div></div>
+
+      <!-- Add: pick a template, or fill it in yourself. -->
+      <div class="mcp-add">
+        <div class="mcp-cat" id="mcpCat"></div>
+        <div class="mcp-form" id="mcpForm">
+          <input id="mcpName" placeholder="Name" />
+          <select id="mcpAuth">
+            <option value="none">No auth</option>
+            <option value="oauth">Sign in (OAuth)</option>
+            <option value="key">API key</option>
+          </select>
+          <input id="mcpUrl" class="wide" placeholder="https://… (or a command to run)" />
+          <input id="mcpKey" class="wide" type="password" placeholder="Paste the key — saved to secrets.json" />
+          <input id="mcpClientId" placeholder="Client ID (if the server needs one)" />
+          <input id="mcpClientSecret" type="password" placeholder="Client secret (optional)" />
+          <div class="mcp-actions">
+            <span class="mcp-hint" id="mcpHint">Saved to ~/.patroam/mcp.json</span>
+            <span class="mcp-btn" id="mcpAdd">Add connector</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="todo" class="todo">
+      <div class="todo-head">
+        <span class="todo-title">☑ TODO</span>
+        <span><span id="todoRefresh" class="x" title="Refresh">⟳</span>
+              &nbsp;<span class="x" id="todoClose" title="Close">✕</span></span>
+      </div>
+      <div class="todo-stats" id="todoStats"></div>
+      <div class="todo-new">
+        <input id="todoText" placeholder="Add a task…  (!! = urgent)" />
+        <input id="todoDue" class="due" placeholder="due…" />
+        <span class="addb" id="todoAdd">＋</span>
+      </div>
+      <div class="todo-list" id="todoList"><div class="todo-empty">Loading…</div></div>
+      <div class="todo-foot">
+        <span id="todoShowDone">Show completed</span>
+        <span id="todoOpenGoogle">Open in Google Tasks ↗</span>
       </div>
     </div>
 
@@ -493,6 +844,7 @@
           <div class="ghint">drag a node to move it (children follow) · drag drops it in place · right-click for options · scroll to zoom · Esc to exit</div>
           <div class="kg-overlay" id="kgOverlay"></div>
         </div>
+        <div class="kg-pending" id="kgPending"></div>
         <div class="meta" id="kgMeta">Loading…</div>
         <div class="kg-detail" id="kgDetail"></div>
         <div class="kg-list" id="kgList"></div>
@@ -512,6 +864,16 @@
       <div class="chat-head"><span>Conversation</span><span class="x" id="chatClose">✕</span></div>
       <div id="log" class="chat-log"></div>
     </div>
+    <div id="rt" class="rt">
+      <span class="orbit"></span>
+      <span class="lbl" id="rtLabel">đang nghe</span>
+      <span class="tool" id="rtTool"></span>
+      <select id="rtWorker" class="rtsel" title="Model soạn câu trả lời"></select>
+      <select id="rtVoice" class="rtsel" title="Giọng nói"></select>
+      <select id="rtAccent" class="rtsel" title="Chất giọng"></select>
+      <span class="x" id="rtStop" title="Tắt">✕</span>
+    </div>
+
     <div id="status" class="status"></div>
     <div class="hint">drag to rotate · scroll to zoom · click to pulse</div>
     <div class="bar">
@@ -847,11 +1209,13 @@ function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,c=>({'&':'&amp;'
 const insp=$('insp');
 function kgTabActive(){ return insp.classList.contains('open') && $('pane-kg').classList.contains('sel'); }
 function toggleInsp(show){ const open=show===undefined?!insp.classList.contains('open'):show;
+  // The TODO panel shares this edge — slide it away rather than stack on it.
+  if(open && typeof closeLeftPanels==='function') closeLeftPanels('insp');
   insp.classList.toggle('open',open);
   if(open){ loadGraph(); loadRag(); } else { setFull(false); stopGraphAnim(); } }
 $('inspToggle').onclick=()=>toggleInsp();
 $('inspClose').onclick=()=>toggleInsp(false);
-$('noteToggle').onclick=()=>{ const a=api(); if(a&&a.new_note) a.new_note(''); };
+$('noteToggle').onclick=()=>{ try{ toggleNotes(); }catch(_){} };
 document.querySelectorAll('.tab').forEach(tb=>{ tb.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('sel'));
   document.querySelectorAll('.pane').forEach(x=>x.classList.remove('sel'));
@@ -877,7 +1241,9 @@ function setFull(on){
   }
 }
 $('gExpand').onclick=(e)=>{ e.stopPropagation(); setFull(!$('graphWrap').classList.contains('full')); };
-addEventListener('keydown',e=>{ if(e.key==='Escape') setFull(false); });
+// Escape only leaves the fullscreen graph when we're NOT working — collapsing
+// the workspace to the orb is what going to rest is for.
+addEventListener('keydown',e=>{ if(e.key==='Escape' && uiMode!=='work') setFull(false); });
 
 // ── 3D knowledge graph (Canvas2D projection — rotate / drag / zoom / click) ─────
 const G={ nodes:[], edges:[], byId:{}, run:false, raf:0, t:0, hot:0, sel:null, hoverId:null,
@@ -1315,9 +1681,12 @@ gcvEl.addEventListener('pointerleave', ()=>{ G.hoverId=null; });
 function selectNode(id, center){ G.sel=id; renderDetail();
   if(center){ G.centering=true; G.focus=true; G.userPan=false; } }
 function clearSel(){ G.sel=null; renderDetail(); }
-// Esc: deselect, recentre, cancel free-pan / link mode, exit focus mode.
-addEventListener('keydown', e=>{ if(e.key==='Escape'){ G.userPan=false; cancelLink(); hideMenu();
-  if(G.focusMode){ G.focusMode=false; syncTools(); } clearSel(); } });
+// Esc backs out one step: an open left panel first, otherwise deselect,
+// recentre, cancel free-pan / link mode, exit focus mode.
+addEventListener('keydown', e=>{ if(e.key!=='Escape') return;
+  if(typeof leftPanelOpen==='function' && leftPanelOpen()){ closeLeftPanels(); return; }
+  G.userPan=false; cancelLink(); hideMenu();
+  if(G.focusMode){ G.focusMode=false; syncTools(); } clearSel(); });
 
 // ── Group colours (shared by legend + hulls) ──────────────────────────────────
 function groupColor(g){ const keys=Object.keys(G.anchors); const i=Math.max(0,keys.indexOf(g));
@@ -1536,7 +1905,10 @@ function renderDetail(){
     '<div class="detail-form"></div>'+
     '<div class="detail-project"></div>'+
     '<div class="detail-media"></div>';
-  dEl.innerHTML=html; oEl.innerHTML=html; oEl.classList.add('show');
+  dEl.innerHTML=html; oEl.innerHTML=html;
+  // Opening a node (a project especially) clears the left edge for it, so the
+  // detail is never half-covered by a panel that happened to be open.
+  if(typeof closeLeftPanels==='function') closeLeftPanels('overlay'); else oEl.classList.add('show');
   wireDetail(dEl); wireDetail(oEl);
   loadNodeMedia(G.sel);
   if(isProject(G.sel)) loadProjectView(G.sel);   // selected node IS a project
@@ -1685,7 +2057,7 @@ async function loadGraph(){ if(!api())return;
       const a=G.nodes[i], b=G.nodes[j];
       if(Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z)<0.4){ bad=1; break; } }
     if(bad) G.hot=1; }
-  startGraphAnim(); renderDetail(); buildLegend(); syncTools();
+  startGraphAnim(); renderDetail(); buildLegend(); syncTools(); loadPending();
   $('kgMeta').innerHTML='<b>'+tr.length+'</b> relationships · <b>'+
     new Set(tr.flatMap(t=>[t.s,t.o])).size+'</b> entities · <span style="opacity:.6">drag a node · right-click · scroll</span>';
   $('kgList').innerHTML = tr.length ? tr.map(t=>
@@ -1741,6 +2113,608 @@ setInterval(async()=>{ if(!kgVisible()||!api()) return;
       $('kgMeta').innerHTML='<b>'+tr.length+'</b> relationships · <b>'+
         new Set(tr.flatMap(t=>[t.s,t.o])).size+'</b> entities · <span style="opacity:.6">drag a node · right-click · scroll</span>'; }
   }catch(_){} }, 4000);
+
+// ── Realtime voice (Gemini Live + Groq) ───────────────────────────────────────
+// Gemini hears you and speaks; Groq does the actual work behind the tool calls.
+// The pill shows which of the two is busy, so a pause is never a mystery.
+const RT_LABEL={listening:'đang nghe', thinking:'đang xử lý', speaking:'đang nói',
+                reconnecting:'đang kết nối lại…', idle:'sẵn sàng'};
+let _rtPoll=null, _rtToolTO=null;
+
+function rtPaint(state, stats){
+  const el=$('rt');
+  el.className='rt on '+(state||'idle');
+  $('rtLabel').textContent=RT_LABEL[state]||state||'';
+  // Telemetry lives in the tooltip, not on screen: it was developer detail
+  // sitting permanently in the user's eyeline.
+  if(stats && stats.turns){
+    el.title='Độ trễ p50 '+stats.p50_ms+'ms · p95 '+(stats.p95_ms||0)+'ms'
+      + ' · '+stats.turns+' lượt'
+      + (stats.billed_fraction!=null
+         ? '\nChỉ '+Math.round(stats.billed_fraction*100)+'% âm thanh được gửi lên (phần còn lại là im lặng, không tính phí)'
+         : '');
+  }
+}
+function rtHide(){ $('rt').className='rt'; $('rtToggle').classList.remove('live');
+  clearInterval(_rtPoll); _rtPoll=null; }
+
+async function rtToggle(){
+  const a=api(); if(!a||!a.realtime_toggle) return;
+  $('rtToggle').classList.add('live');
+  const r=await a.realtime_toggle();
+  if(r && r.error){ window.patroam.setStatus('realtime: '+r.error); rtHide(); return; }
+  if(r && r.running){
+    rtPaint('listening');
+    rtLoadOptions();
+    clearInterval(_rtPoll);
+    _rtPoll=setInterval(async()=>{ try{
+      const s=await a.realtime_status();
+      if(!s.running){ rtHide(); return; }
+      rtPaint(s.state, s);
+    }catch(_){ } }, 1500);
+  } else rtHide();
+}
+$('rtToggle').onclick=rtToggle;
+$('rtStop').onclick=rtToggle;
+
+// Dropdowns: which model writes the answers, and how PATROAM sounds.
+let _rtOptsLoaded=false;
+async function rtLoadOptions(){
+  const a=api(); if(!a||!a.realtime_options||_rtOptsLoaded) return;
+  let o; try{ o=await a.realtime_options(); }catch(_){ return; }
+  _rtOptsLoaded=true;
+  const fill=(el,items,sel,mark)=>{ el.innerHTML=items.map(i=>
+    '<option value="'+escAttr(i.id)+'"'+(i.id===sel?' selected':'')+
+    (mark&&i.available===false?' disabled':'')+'>'+
+    esc(i.label)+(mark&&i.available===false?' (chưa cài)':'')+'</option>').join(''); };
+  fill($('rtWorker'), o.workers||[], o.worker, true);
+  fill($('rtVoice'),  o.voices||[],  o.voice);
+  fill($('rtAccent'), o.accents||[], o.accent);
+}
+async function rtApply(){
+  const a=api(); if(!a||!a.realtime_set) return;
+  const r=await a.realtime_set($('rtWorker').value, $('rtVoice').value, $('rtAccent').value);
+  // Voice and accent are fixed when the socket opens, so changing them restarts
+  // the session; the pill re-syncs itself from Python afterwards.
+  if(r && r.restarted) window.patroam.setStatus('đổi giọng — kết nối lại');
+}
+['rtWorker','rtVoice','rtAccent'].forEach(id=>{ const el=$(id);
+  el.onchange=rtApply;
+  el.onclick=(e)=>e.stopPropagation(); });
+
+// Pushed from Python as the session changes.
+window.patroam.realtimeState=function(state){ try{
+  if($('rt').classList.contains('on')) rtPaint(state); }catch(_){} };
+window.patroam.realtimeTool=function(text){ try{
+  $('rtTool').textContent='⚙ '+text;
+  clearTimeout(_rtToolTO);
+  _rtToolTO=setTimeout(()=>{ $('rtTool').textContent=''; }, 4000);
+}catch(_){} };
+window.patroam.realtimeChanged=function(){ try{
+  const a=api(); if(!a||!a.realtime_status) return;
+  a.realtime_status().then(s=>{ if(s.running){ $('rtToggle').classList.add('live'); rtPaint(s.state,s); }
+                                else rtHide(); });
+}catch(_){} };
+
+// ── Automations (n8n) ─────────────────────────────────────────────────────────
+// n8n ships no native UI — its editor is a web app. So PATROAM renders it inside
+// its OWN window (an embedded frame here, or a separate PATROAM window) rather
+// than handing you off to a browser: no address bar, no tabs, same shell.
+let _autoPoll=null, _autoLoaded=false;
+function setAutoState(state, msg){
+  const d=$('autoDot'); d.className='dot'+(state==='running'?' up':state==='starting'?' busy':
+    (state==='error'||state==='not_installed')?' bad':'');
+  $('autoMsg').textContent=msg||'';
+}
+async function pollAuto(){
+  const a=api(); if(!a||!a.n8n_status) return;
+  let s; try{ s=await a.n8n_status(); }catch(_){ return; }
+  setAutoState(s.state, s.detail || (s.state==='running'?s.url:s.state));
+  const info=$('autoInfo'), fr=$('autoFrame');
+  if(s.state==='running'){
+    if(!_autoLoaded){ _autoLoaded=true;
+      fr.onload=()=>{ fr.dataset.ok='1'; };   // the only reliable signal: the frame
+      fr.src=s.url; fr.style.display='block'; info.style.display='none';
+      // n8n serves no X-Frame-Options/CSP, so embedding works. If a future
+      // version starts blocking it, `load` never fires — then offer the window.
+      // (Don't probe contentDocument: it's cross-origin and always throws.)
+      setTimeout(()=>{ if(!fr.dataset.ok) showAutoInfo(
+        'The n8n editor could not be embedded here.\n\n'
+        +'Click ⧉ Window to open it in its own PATROAM window instead.'); }, 12000);
+    }
+    clearInterval(_autoPoll); _autoPoll=null; return;
+  }
+  if(s.state==='not_installed'){
+    showAutoInfo('n8n isn\'t installed yet.\n\nInstall it once with:\n\n<code>npm install -g n8n</code>\n\nthen reopen this panel.');
+    clearInterval(_autoPoll); _autoPoll=null; return;
+  }
+  if(s.state==='error'){ showAutoInfo('n8n could not start.\n\n'+esc(s.detail||''));
+    clearInterval(_autoPoll); _autoPoll=null; return; }
+  showAutoInfo('Starting n8n…  (the first launch builds its database, ~30–60s)');
+}
+function showAutoInfo(html){ const i=$('autoInfo');
+  i.innerHTML=html; i.style.display='flex'; $('autoFrame').style.display='none'; }
+
+async function toggleAuto(show){
+  const el=$('auto');
+  const open = show===undefined ? !el.classList.contains('open') : !!show;
+  // It covers the whole workspace, so nothing else should be left underneath.
+  if(open && typeof closeLeftPanels==='function') closeLeftPanels('auto');
+  el.classList.toggle('open', open);
+  if(!open){ clearInterval(_autoPoll); _autoPoll=null; return; }
+  const a=api(); if(a&&a.n8n_start) a.n8n_start();     // start on demand too
+  pollAuto();
+  clearInterval(_autoPoll); _autoPoll=setInterval(pollAuto, 2500);
+}
+$('autoToggle').onclick=()=>toggleAuto();
+$('autoClose').onclick=()=>toggleAuto(false);
+$('autoReload').onclick=()=>{ const f=$('autoFrame');
+  if(f.src){ f.src=f.src; } else { _autoLoaded=false; pollAuto(); } };
+$('autoWindow').onclick=()=>{ const a=api(); if(a&&a.n8n_open_window) a.n8n_open_window(); };
+window.patroam.openAutomations=function(){ try{ toggleAuto(true); }catch(_){} };
+
+// ── Pending new-node approvals ────────────────────────────────────────────────
+// Facts the model proposed that would create entities the graph has never seen.
+// Nothing is written until you say yes — bad extractions used to land silently.
+async function loadPending(){
+  const a=api(); if(!a||!a.graph_pending) return;
+  let r; try{ r=await a.graph_pending(); }catch(_){ return; }
+  const el=$('kgPending'), facts=(r&&r.facts)||[], nodes=(r&&r.nodes)||[];
+  if(!facts.length){ el.classList.remove('show'); el.innerHTML=''; return; }
+  el.innerHTML='<div class="kgp-t">🔗 '+nodes.length+' new node'+(nodes.length!==1?'s':'')
+    +' proposed — approve?</div><div class="kgp-f">'
+    + facts.slice(0,6).map(f=>'<b>'+esc(f.s)+'</b> '+esc(f.r.replace(/_/g,' ').toLowerCase())
+        +' <b>'+esc(f.o)+'</b>').join('<br>')
+    + (facts.length>6?'<br>… +'+(facts.length-6)+' more':'')
+    + '</div><div class="kgp-btns">'
+    + '<span class="dbtn" data-p="ok">✓ Add</span>'
+    + '<span class="dbtn danger" data-p="no">✕ Discard</span></div>';
+  el.classList.add('show');
+  el.querySelector('[data-p="ok"]').onclick=async()=>{ await a.graph_approve(); await loadGraph(); loadPending(); };
+  el.querySelector('[data-p="no"]').onclick=async()=>{ await a.graph_reject(); loadPending(); };
+}
+window.patroam.graphPendingChanged=function(){ try{ loadPending(); }catch(_){} };
+
+// ── Calendar panel (Google Calendar) ──────────────────────────────────────────
+let _calSnap={events:[],counts:{}}, _calSel=null;
+function toggleCal(show){ const el=$('cal');
+  const open = show===undefined ? !el.classList.contains('open') : !!show;
+  if(open) closeLeftPanels('cal');
+  el.classList.toggle('open', open);
+  if(open) loadCal();
+  syncOverlay();          // the detail shares this corner
+  return open; }
+$('calToggle').onclick=()=>toggleCal();
+$('calClose').onclick=()=>toggleCal(false);
+$('calRefresh').onclick=()=>loadCal();
+$('calOpenGoogle').onclick=()=>{ const a=api(); if(a&&a.open_url) a.open_url('https://calendar.google.com/'); };
+
+async function loadCal(){ const a=api(); if(!a||!a.calendar_snapshot) return;
+  try{ _calSnap = await a.calendar_snapshot(14) || {events:[],counts:{}}; }
+  catch(e){ _calSnap={events:[],counts:{},error:String(e)}; }
+  renderCal(); }
+
+// What one event looks like when you click it: the things a calendar entry
+// actually carries — full time range, where, which calendar, the description —
+// plus the two actions worth having at hand.
+// Google stores event descriptions as HTML. Escaping it verbatim showed you raw
+// <a href="…"> tags, so strip the markup down to the text (and the link URLs,
+// which are usually the useful part — a meeting link, a ticket page).
+function plainText(html){
+  if(!html) return '';
+  const d=document.createElement('div');
+  d.innerHTML=String(html).replace(/<br\s*\/?>/gi,'\n').replace(/<\/p>/gi,'\n');
+  d.querySelectorAll('a').forEach(a=>{ const href=a.getAttribute('href')||'';
+    if(href && a.textContent.trim()!==href) a.textContent=a.textContent.trim()+' ('+href+')'; });
+  return (d.textContent||'').replace(/\n{3,}/g,'\n\n').trim();
+}
+
+function calDetail(e){
+  const rows=[];
+  if(e.when) rows.push(['When', e.when]);
+  if(e.location) rows.push(['Where', e.location]);
+  if(e.calendar) rows.push(['Calendar', e.calendar]);
+  return '<div class="rdet">'
+    + rows.map(([k,v])=>'<div><span class="k">'+k+'</span>'+esc(v)+'</div>').join('')
+    + (e.description?'<div class="desc">'+esc(plainText(e.description))+'</div>':'')
+    + '<div class="acts">'
+    + (e.url?'<span class="b" data-act="open">Open in Google ↗</span>':'')
+    + '<span class="b danger" data-act="del">Delete</span></div></div>';
+}
+
+function renderCal(){
+  const s=_calSnap, L=$('calList'), c=s.counts||{};
+  $('calStats').innerHTML = (c.today?'<span class="tstat today">'+c.today+' today</span>':'')
+    + (c.total!=null?'<span class="tstat">'+c.total+' upcoming</span>':'');
+  if(s.error){ L.innerHTML='<div class="todo-err">'+esc(s.error)+'</div>'; return; }
+  const evs=s.events||[];
+  if(!evs.length){ L.innerHTML='<div class="todo-empty">Nothing scheduled</div>'; return; }
+  // Group by day so the panel reads like a calendar, not a flat list.
+  let h='', lastDay=null;
+  evs.forEach(e=>{
+    if(e.day!==lastDay){ lastDay=e.day;
+      const label=(e.when||'').split(' · ')[0] || e.day;
+      h+='<div class="cday'+(e.is_today?' today':'')+'">'+esc(label)+'</div>'; }
+    const open=_calSel===e.id;
+    h+='<div class="cev'+(e.all_day?' allday':'')+(open?' sel':'')
+      +'" data-id="'+escAttr(e.id)+'">'
+      +'<span class="t">'+(e.all_day?'all day':esc(e.time))+'</span>'
+      +'<span class="bar"></span><span class="b"><span class="nm">'+esc(e.title)+'</span>'
+      +((e.location||e.calendar)?'<div class="meta">'
+        +esc([e.location,e.calendar].filter(Boolean).join(' · '))+'</div>':'')
+      +(open?calDetail(e):'')
+      +'</span><span class="del" data-act="del" title="Delete">✕</span></div>';
+  });
+  L.innerHTML=h;
+}
+
+$('calList').addEventListener('click', async (e)=>{
+  const row=e.target.closest('.cev'); if(!row) return;
+  const a=api(); if(!a) return;
+  const id=row.dataset.id, act=(e.target.dataset||{}).act;
+  const ev=(_calSnap.events||[]).find(x=>x.id===id);
+  if(act==='del'){ await a.calendar_delete(id, (ev&&ev.calendar_id)||'primary');
+    if(_calSel===id) _calSel=null; loadCal(); return; }
+  if(act==='open'){ if(a.open_url && ev && ev.url) a.open_url(ev.url); return; }
+  _calSel = (_calSel===id ? null : id); renderCal();   // click to open the detail
+});
+
+async function addCalEvent(){ const a=api(); if(!a) return;
+  const t=$('calText').value.trim(); if(!t) return;
+  const w=$('calWhen').value.trim();
+  if(!w){ window.patroam.setStatus('when?'); return; }
+  $('calText').value=''; $('calWhen').value='';
+  const r=await a.calendar_add(t, w);
+  if(r && r.error) window.patroam.setStatus('calendar: '+r.error);
+  else if(r && r.clash && r.clash.length)
+    window.patroam.setStatus('⚠ clashes with: '+r.clash.join('; '));
+  loadCal(); }
+$('calAdd').onclick=addCalEvent;
+['calText','calWhen'].forEach(id=>$(id).addEventListener('keydown', e=>{
+  e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); addCalEvent(); } }));
+
+window.patroam.openCalendar=function(){ try{ toggleCal(true); }catch(_){} };
+window.patroam.calendarChanged=function(){ try{
+  if($('cal').classList.contains('open')) loadCal(); }catch(_){} };
+
+// ── Notes panel ───────────────────────────────────────────────────────────────
+// Notes used to be a node in the graph you had to hunt for. They are a panel
+// now, like the calendar and the to-dos: write one, read one, edit it in place.
+let _notesSnap={notes:[],counts:{}}, _noteSel=null;
+
+function toggleNotes(show){ const el=$('notes');
+  const open = show===undefined ? !el.classList.contains('open') : !!show;
+  if(open) closeLeftPanels('notes');
+  el.classList.toggle('open', open);
+  if(open){ loadNotes(); setTimeout(()=>$('noteText').focus(), 200); }
+  syncOverlay();
+  return open; }
+$('notesClose').onclick=()=>toggleNotes(false);
+$('notesRefresh').onclick=()=>loadNotes();
+$('notesOpenFolder').onclick=()=>{ const a=api();
+  if(a&&a.open_path&&_notesSnap.folder) a.open_path(_notesSnap.folder); };
+$('notesReview').onclick=()=>{ const a=api();
+  if(a&&a.send) { a.send('review my notes'); window.patroam.showChat&&window.patroam.showChat(); } };
+
+async function loadNotes(){ const a=api(); if(!a||!a.notes_snapshot) return;
+  try{ _notesSnap = await a.notes_snapshot() || {notes:[]}; }
+  catch(e){ _notesSnap={notes:[],counts:{},error:String(e)}; }
+  renderNotes(); }
+
+function renderNotes(){
+  const s=_notesSnap, L=$('notesList'), list=s.notes||[];
+  $('notesStats').innerHTML='<span class="tstat">'+list.length+' notes</span>';
+  if(s.error){ L.innerHTML='<div class="todo-err">'+esc(s.error)+'</div>'; return; }
+  if(!list.length){ L.innerHTML='<div class="todo-empty">No notes yet</div>'; return; }
+  L.innerHTML=list.map(n=>{
+    const open=_noteSel===n.id;
+    return '<div class="nitem'+(open?' sel':'')+'" data-id="'+escAttr(n.id)+'">'
+      +'<div class="row"><span class="nm">'+esc(n.title)+'</span>'
+      +(n.when?'<span class="when">'+esc(n.when)+'</span>':'')
+      +'<span class="del" data-act="del" title="Delete">✕</span></div>'
+      +(open ? '<textarea data-act="body">'+esc(n.body)+'</textarea>'
+             +'<div class="rdet"><div class="acts">'
+             +'<span class="b" data-act="save">Save</span>'
+             +'<span class="b" data-act="openfile">Open file ↗</span></div></div>'
+             : (n.preview?'<div class="pv2">'+esc(n.preview)+'</div>':''))
+      +'</div>'; }).join('');
+}
+
+$('notesList').addEventListener('click', async (e)=>{
+  const item=e.target.closest('.nitem'); if(!item) return;
+  const id=item.dataset.id, act=(e.target.dataset||{}).act, a=api(); if(!a) return;
+  const note=(_notesSnap.notes||[]).find(n=>n.id===id);
+  if(act==='del'){ await a.note_delete(id); if(_noteSel===id) _noteSel=null; loadNotes(); return; }
+  if(act==='openfile'){ if(a.open_path && note) a.open_path(note.path); return; }
+  if(act==='save'){ const ta=item.querySelector('textarea');
+    if(note && ta){ await a.note_save(note.title, ta.value); loadNotes(); }
+    return; }
+  if(act==='body') return;                       // typing in the editor
+  _noteSel = (_noteSel===id ? null : id); renderNotes();
+});
+$('notesList').addEventListener('keydown', e=>e.stopPropagation());
+
+async function addNote(){ const a=api(); if(!a||!a.note_save) return;
+  const t=$('noteText').value.trim(); if(!t) return;
+  $('noteText').value='';
+  await a.note_save('', t);                      // first line becomes the title
+  loadNotes(); }
+$('noteAdd').onclick=addNote;
+$('noteText').addEventListener('keydown', e=>{ e.stopPropagation();
+  if(e.key==='Enter'){ e.preventDefault(); addNote(); } });
+
+window.patroam.openNotes=function(){ try{ toggleNotes(true); }catch(_){} };
+window.patroam.notesChanged=function(){ try{
+  if($('notes').classList.contains('open')) loadNotes(); }catch(_){} };
+
+// ── Connectors panel (MCP) ────────────────────────────────────────────────────
+// Add an MCP server without leaving PATROAM: pick a template or type a URL,
+// and if the server wants authorization PATROAM opens the sign-in page in its
+// own window. Keys typed here go to secrets.json — mcp.json only ever holds a
+// ${NAME} reference, so it stays safe to read or copy.
+let _mcpSnap={servers:[],catalog:[],tools:[]}, _mcpPick=null;
+
+function toggleMcp(show){ const el=$('mcp');
+  const open = show===undefined ? !el.classList.contains('open') : !!show;
+  if(open) closeLeftPanels('mcp');
+  el.classList.toggle('open', open);
+  if(open) loadMcp();
+  syncOverlay();
+  return open; }
+$('mcpToggle').onclick=()=>toggleMcp();
+$('mcpClose').onclick=()=>toggleMcp(false);
+$('mcpRefresh').onclick=()=>loadMcp();
+
+async function loadMcp(){ const a=api(); if(!a||!a.mcp_list) return;
+  try{ _mcpSnap = await a.mcp_list() || _mcpSnap; }
+  catch(e){ _mcpSnap={servers:[],catalog:[],tools:[],error:String(e)}; }
+  renderMcp(); }
+
+const MCP_STATE={ready:'connected', error:'failed', connecting:'connecting…',
+                 off:'disabled', empty:'no tools', idle:'not connected'};
+
+function renderMcp(){
+  const s=_mcpSnap, L=$('mcpList');
+  $('mcpStats').innerHTML =
+      '<span class="tstat">'+(s.servers||[]).length+' connectors</span>'
+    + '<span class="tstat">'+(s.tools||[]).length+' tools</span>'
+    + (s.sdk===false?'<span class="tstat over">SDK missing — pip install mcp</span>':'');
+  if(s.error){ L.innerHTML='<div class="todo-err">'+esc(s.error)+'</div>'; }
+  else if(!(s.servers||[]).length){
+    L.innerHTML='<div class="todo-empty">No connectors yet — add one below</div>'; }
+  else {
+    L.innerHTML=(s.servers||[]).map(v=>{
+      const where=v.url||v.command||'';
+      const note=(where?'<div class="meta">'+esc(where)+'</div>':'')
+        + (v.error?'<div class="meta bad">'+esc(v.error)+'</div>':'');
+      const tools=v.tool_names&&v.tool_names.length
+        ? '<div class="meta">'+esc(v.tool_names.slice(0,6).join(', '))
+          +(v.tool_names.length>6?' +'+(v.tool_names.length-6):'')+'</div>' : '';
+      return '<div class="msrv '+esc(v.state)+'" data-n="'+escAttr(v.name)+'">'
+        +'<div class="row"><span class="dot"></span>'
+        +'<span class="nm">'+esc(v.name)+'</span>'
+        +'<span class="act" data-act="conn" title="Connect / reconnect">⟳</span>'
+        +(v.authorized?'<span class="act" data-act="out" title="Sign out">⎋</span>':'')
+        +'<span class="act rm" data-act="rm" title="Remove">✕</span></div>'
+        +'<div class="meta">'+esc(MCP_STATE[v.state]||v.state)
+        +(v.tools?' · '+v.tools+' tools':'')+(v.oauth?' · OAuth':'')+'</div>'
+        +note+tools+'</div>';
+    }).join('');
+  }
+  // Templates
+  $('mcpCat').innerHTML=(s.catalog||[]).map((c,i)=>
+    '<span class="c'+(c.added?' added':'')+'" data-i="'+i+'" title="'+escAttr(c.blurb||'')+'">'
+    +esc(c.label)+'</span>').join('');
+}
+
+$('mcpCat').addEventListener('click', e=>{
+  const el=e.target.closest('.c'); if(!el) return;
+  const c=(_mcpSnap.catalog||[])[+el.dataset.i]; if(!c) return;
+  _mcpPick=c;
+  $('mcpName').value=c.label;
+  $('mcpUrl').value=c.url || [c.command].concat(c.args||[]).join(' ');
+  $('mcpAuth').value=c.auth||'none';
+  $('mcpKey').value='';
+  syncMcpForm();
+  $('mcpHint').textContent=c.hint||c.blurb||'';
+});
+
+function syncMcpForm(){
+  const auth=$('mcpAuth').value, key=auth==='key', oauth=auth==='oauth';
+  $('mcpKey').style.display=key?'':'none';
+  if(!key) $('mcpKey').value='';
+  // Some OAuth servers (Meta's, for one) don't support dynamic registration and
+  // refuse to connect without a client the user registered themselves.
+  $('mcpClientId').style.display=oauth?'':'none';
+  $('mcpClientSecret').style.display=oauth?'':'none';
+  if(!oauth){ $('mcpClientId').value=''; $('mcpClientSecret').value=''; }
+}
+$('mcpAuth').onchange=syncMcpForm; syncMcpForm();
+
+$('mcpAdd').onclick=async ()=>{
+  const a=api(); if(!a||!a.mcp_add) return;
+  const name=$('mcpName').value.trim(), where=$('mcpUrl').value.trim();
+  if(!name || !where){ $('mcpHint').textContent='Needs a name and a URL or command.'; return; }
+  const auth=$('mcpAuth').value;
+  const spec={name, auth, transport:(_mcpPick&&_mcpPick.transport)||''};
+  if(/^https?:\/\//i.test(where)){ spec.url=where; spec.transport=spec.transport||'http'; }
+  else { const parts=where.split(/\s+/); spec.command=parts[0]; spec.args=parts.slice(1);
+         spec.transport='stdio'; }
+  if(auth==='key'){ spec.key=$('mcpKey').value;
+    if(_mcpPick){ spec.secret=_mcpPick.secret||''; spec.header=_mcpPick.header||'';
+                  spec.prefix=_mcpPick.prefix||''; } }
+  if(auth==='oauth'){ const cid=$('mcpClientId').value.trim(), cs=$('mcpClientSecret').value.trim();
+    if(cid) spec.client_id=cid;
+    if(cs)  spec.client_secret=cs; }
+  const btn=$('mcpAdd'); btn.classList.add('busy');
+  btn.textContent = auth==='oauth' ? 'Waiting for sign-in…' : 'Connecting…';
+  $('mcpHint').textContent = auth==='oauth'
+    ? 'A window will open for you to authorize.' : 'Connecting…';
+  let r; try{ r=await a.mcp_add(spec); }catch(e){ r={ok:false,error:String(e)}; }
+  btn.classList.remove('busy'); btn.textContent='Add connector';
+  const st=(r&&r.status)||{};
+  $('mcpHint').textContent = (r&&r.error) || st.error
+    || (st.state==='ready' ? 'Connected — '+st.tools+' tools ready.' : 'Added.');
+  if(!(r&&r.error) && !st.error){
+    ['mcpName','mcpUrl','mcpKey','mcpClientId','mcpClientSecret'].forEach(id=>$(id).value='');
+    _mcpPick=null; }
+  loadMcp();
+};
+
+$('mcpList').addEventListener('click', async e=>{
+  const act=(e.target.dataset||{}).act; if(!act) return;
+  const row=e.target.closest('.msrv'); const a=api(); if(!row||!a) return;
+  const name=row.dataset.n;
+  if(act==='rm'){ await a.mcp_remove(name); }
+  else if(act==='out'){ await a.mcp_sign_out(name); }
+  else if(act==='conn'){
+    row.className='msrv connecting';
+    $('mcpHint').textContent='Connecting to '+name+'…';
+    await a.mcp_connect(name); }
+  loadMcp();
+});
+
+['mcpName','mcpUrl','mcpKey','mcpClientId','mcpClientSecret'].forEach(id=>$(id).addEventListener('keydown', e=>{
+  e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); $('mcpAdd').click(); } }));
+
+window.patroam.openConnectors=function(){ try{ toggleMcp(true); }catch(_){} };
+
+// ── TODO panel (Google Tasks) ─────────────────────────────────────────────────
+let _todoShowDone=false, _todoSnap={open:[],done:[],counts:{}}, _todoSel=null;
+
+// A task's detail: its deadline, which list it lives in, and its notes —
+// the parts Google Tasks keeps but a single line has no room for.
+function todoDetail(t){
+  const rows=[];
+  if(t.when) rows.push(['Due', t.when.replace(' · all day','') + (t.overdue?'  (overdue)':'')]);
+  if(t.list) rows.push(['List', t.list]);
+  if(t.priority) rows.push(['Priority', t.priority>1?'urgent':'important']);
+  if(t.done && t.completed_at) rows.push(['Completed', t.completed_at.slice(0,16).replace('T',' ')]);
+  return '<div class="rdet">'
+    + (rows.length?rows.map(([k,v])=>'<div><span class="k">'+k+'</span>'+esc(v)+'</div>').join('')
+                  :'<div>No deadline set.</div>')
+    + (t.notes?'<div class="desc">'+esc(t.notes)+'</div>':'')
+    + '<div class="acts"><span class="b" data-act="edit">Rename</span>'
+    + '<span class="b" data-act="toggle">'+(t.done?'Reopen':'Mark done')+'</span>'
+    + '<span class="b danger" data-act="del">Delete</span></div></div>';
+}
+// Only ONE surface may occupy the left edge, so opening one slides the others
+// away instead of stacking them. Two things are deliberately NOT in that group:
+//   * the fullscreen knowledge graph — it is the workspace background, not a
+//     panel. Collapsing it on every TODO/Calendar click dropped you back to the
+//     orb, which belongs to sleep, not to work.
+//   * the node/project detail, which is hidden while a panel covers its corner
+//     and comes back when the panel closes (selection is kept either way).
+const LEFT_PANELS=[['todo',()=>toggleTodo(false)],['cal',()=>toggleCal(false)],
+                   ['mcp',()=>toggleMcp(false)],['notes',()=>toggleNotes(false)],
+                   ['auto',()=>toggleAuto(false)]];
+function leftPanelOpen(){ return LEFT_PANELS.some(([id])=>$(id).classList.contains('open')); }
+function closeLeftPanels(except){
+  LEFT_PANELS.forEach(([id,close])=>{ if(except!==id && $(id).classList.contains('open')) close(); });
+  if(except!=='insp' && insp.classList.contains('open')
+     && !document.body.classList.contains('graph-full')) toggleInsp(false);
+  syncOverlay();
+}
+// The detail overlay shares the bottom-left corner with the panels.
+function syncOverlay(){ const o=$('kgOverlay'); if(!o) return;
+  o.classList.toggle('show', !!G.sel && !leftPanelOpen()); }
+
+function toggleTodo(show){ const el=$('todo');
+  const open = show===undefined ? !el.classList.contains('open') : !!show;
+  if(open) closeLeftPanels('todo');
+  el.classList.toggle('open', open);
+  if(open) loadTodos();
+  syncOverlay();
+  return open; }
+$('todoToggle').onclick=()=>toggleTodo();
+$('todoClose').onclick=()=>toggleTodo(false);
+$('todoRefresh').onclick=()=>loadTodos();
+$('todoShowDone').onclick=()=>{ _todoShowDone=!_todoShowDone;
+  $('todoShowDone').textContent=_todoShowDone?'Hide completed':'Show completed'; renderTodos(); };
+$('todoOpenGoogle').onclick=()=>{ const a=api(); if(a&&a.open_url) a.open_url('https://tasks.google.com/'); };
+
+async function loadTodos(){ const a=api(); if(!a||!a.tasks_snapshot) return;
+  try{ _todoSnap = await a.tasks_snapshot() || {open:[],done:[],counts:{}}; }
+  catch(e){ _todoSnap={open:[],done:[],counts:{},error:String(e)}; }
+  renderTodos(); }
+
+function renderTodos(){
+  const s=_todoSnap, c=s.counts||{}, L=$('todoList');
+  // stat chips
+  let st='';
+  if(c.open!=null) st+='<span class="tstat">'+c.open+' open</span>';
+  if(c.overdue) st+='<span class="tstat over">'+c.overdue+' overdue</span>';
+  if(c.today) st+='<span class="tstat today">'+c.today+' today</span>';
+  if(c.done) st+='<span class="tstat">'+c.done+' done</span>';
+  $('todoStats').innerHTML=st;
+  if(s.error){ L.innerHTML='<div class="todo-err">'+esc(s.error)+'</div>'; return; }
+  const row=(t)=>{
+    const dueCls = t.overdue?' over' : (t.today?' today':'');
+    const open=_todoSel===t.id;
+    return '<div class="titem'+(t.done?' done':'')+(open?' sel':'')
+      +'" data-id="'+escAttr(t.id)+'">'
+      +'<span class="box" data-act="toggle">✓</span>'
+      +(t.priority?'<span class="pri" title="priority">'+(t.priority>1?'‼':'!')+'</span>':'')
+      +'<span class="tx">'+esc(t.title)+'</span>'
+      +(t.when?'<span class="due'+dueCls+'">'+esc(t.when.replace(' · all day',''))+'</span>':'')
+      +'<span class="del" data-act="del" title="Delete">✕</span>'
+      +(open?todoDetail(t):'')+'</div>'; };
+  let h='';
+  const open=s.open||[], done=s.done||[];
+  if(!open.length && !done.length){ L.innerHTML='<div class="todo-empty">Nothing to do 🎉</div>'; return; }
+  // grouped the way you'd work them
+  const groups=[['Overdue', open.filter(t=>t.overdue)],
+                ['Today', open.filter(t=>!t.overdue&&t.today)],
+                ['Upcoming', open.filter(t=>!t.overdue&&!t.today&&t.due)],
+                ['No due date', open.filter(t=>!t.due)]];
+  groups.forEach(([name,list])=>{ if(!list.length) return;
+    h+='<div class="tsec">'+name+' · '+list.length+'</div>'+list.map(row).join(''); });
+  if(_todoShowDone && done.length)
+    h+='<div class="tsec">Completed · '+done.length+'</div>'+done.map(row).join('');
+  L.innerHTML=h;
+}
+
+// One delegated handler for tick / delete / rename / open the detail.
+$('todoList').addEventListener('click', async (e)=>{
+  const item=e.target.closest('.titem'); if(!item) return;
+  const id=item.dataset.id, act=(e.target.dataset||{}).act, a=api(); if(!a) return;
+  if(act==='toggle'){ const done=!item.classList.contains('done');
+    item.classList.toggle('done', done);                 // optimistic
+    await a.task_done(id, done); loadTodos(); return; }
+  if(act==='del'){ if(_todoSel===id) _todoSel=null;
+    await a.task_delete(id); loadTodos(); return; }
+  if(act!=='edit'){                                      // anywhere else: detail
+    _todoSel = (_todoSel===id ? null : id); renderTodos(); return; }
+  if(act==='edit'){ const sp=item.querySelector('.tx'); const old=sp.textContent;
+    sp.contentEditable='true'; sp.focus();
+    const finish=async(save)=>{ sp.contentEditable='false';
+      const v=sp.textContent.trim();
+      if(save && v && v!==old){ await a.task_update(id, v); loadTodos(); }
+      else sp.textContent=old; };
+    sp.onblur=()=>finish(true);
+    sp.onkeydown=(ev)=>{ ev.stopPropagation();
+      if(ev.key==='Enter'){ ev.preventDefault(); sp.blur(); }
+      if(ev.key==='Escape'){ sp.textContent=old; sp.blur(); } };
+  }
+});
+
+async function addTodo(){ const a=api(); if(!a) return;
+  const t=$('todoText').value.trim(); if(!t) return;
+  const due=$('todoDue').value.trim();
+  $('todoText').value=''; $('todoDue').value='';
+  const r=await a.task_add(t, due);
+  if(r && r.error) window.patroam.setStatus('task: '+r.error);
+  loadTodos(); }
+$('todoAdd').onclick=addTodo;
+['todoText','todoDue'].forEach(id=>$(id).addEventListener('keydown', e=>{
+  e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); addTodo(); } }));
+
+// Python opens the panel when you ask about tasks, and pushes fresh data after
+// any voice change so the list never goes stale.
+window.patroam.openTodo=function(){ try{ toggleTodo(true); }catch(_){} };
+window.patroam.showChat=function(){ try{ toggleChat(true); }catch(_){} };
+window.patroam.tasksChanged=function(){ try{
+  if($('todo').classList.contains('open')) loadTodos(); }catch(_){} };
 
 // ── Frameless window controls (min / max / close) ─────────────────────────────
 $('winMin').onclick=()=>{ const a=api(); if(a&&a.win_minimize) a.win_minimize(); };

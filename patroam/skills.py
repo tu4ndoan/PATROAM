@@ -664,6 +664,27 @@ _ROUTER_PROMPT = (
     'and {"video":"..."} if they named a file/path. e.g. "post my new reel", "publish '
     'this video about the environment pack", "đăng reel mới lên hết các nền tảng".\n'
     '- "content_history": asking what they posted / their recent posts / post history.\n'
+    '- "calendar": READING the calendar — what\'s on, am I free, what\'s next, '
+    'my schedule. Add {"when":"..."} with their own words for the day/range '
+    '("today", "tomorrow", "friday", "next week"), and {"free":true} if they are '
+    "asking when they are FREE rather than what's booked.\n"
+    '- "calendar_add": ADD/SCHEDULE/BOOK a new event. Add {"title":"..."} (what '
+    'it is), {"when":"..."} (their words for date+time, verbatim), and optionally '
+    '{"duration":minutes} and {"location":"..."}.\n'
+    '- "calendar_edit": MOVE/RESCHEDULE/RENAME or CANCEL an existing event. Add '
+    '{"title":"..."} naming which event, {"when":"..."} for the new time if moving, '
+    'and {"cancel":true} if they want it deleted.\n'
+    '- "todo_add": add a TO-DO / task / reminder to their task list ("add a task", '
+    '"remind me to X", "thêm việc", "todo mua sữa"). Add {"title":"..."} with the '
+    'task itself, {"due":"..."} if they gave a deadline in their own words, and '
+    '{"urgent":true} if they stressed it is urgent/important.\n'
+    '- "todo_done": mark a task COMPLETE ("done with X", "xong việc X", "tick off "\n'
+    '"the report"). Add {"title":"..."} naming which task.\n'
+    '- "todo_list": asking what is on their to-do list / what tasks are left / '
+    'what they finished ("what do I have to do", "còn việc gì", "task nào chưa xong").\n'
+    '- "automation": run / trigger one of their n8n automation workflows, or ask '
+    'what automations exist. Add {"name":"..."} naming the workflow if they said '
+    'one ("chạy workflow đăng bài", "run the order printing automation").\n'
     '- "backup_graph": back up / save a copy of the knowledge graph.\n'
     '- "none": anything else — general chat, coding, BUILDING apps/projects, '
     "questions.\n\n"
@@ -680,6 +701,26 @@ _ROUTER_PROMPT = (
     '"đăng video này lên hết đi" -> {"skill":"post_content"}; '
     '"what have I posted lately" -> {"skill":"content_history"}; '
     '"what should I work on from my notes" -> {"skill":"note_suggestions"}; '
+    '"what\'s on my calendar tomorrow" -> {"skill":"calendar","when":"tomorrow"}; '
+    '"lịch của tôi hôm nay thế nào" -> {"skill":"calendar","when":"today"}; '
+    '"when am I free on friday" -> {"skill":"calendar","when":"friday","free":true}; '
+    '"schedule a meeting with Long friday at 3pm" -> '
+    '{"skill":"calendar_add","title":"Meeting with Long","when":"friday at 3pm"}; '
+    '"đặt lịch gặp nha sĩ thứ 3 lúc 10 giờ sáng" -> '
+    '{"skill":"calendar_add","title":"Gặp nha sĩ","when":"thứ 3 lúc 10 giờ sáng"}; '
+    '"move the dentist appointment to 4pm" -> '
+    '{"skill":"calendar_edit","title":"dentist","when":"4pm"}; '
+    '"cancel the standup tomorrow" -> '
+    '{"skill":"calendar_edit","title":"standup","cancel":true}; '
+    '"remind me to buy milk tomorrow" -> '
+    '{"skill":"todo_add","title":"Buy milk","due":"tomorrow"}; '
+    '"thêm việc mua sách vào todo" -> {"skill":"todo_add","title":"Mua sách"}; '
+    '"todo gấp: gửi CV cho công ty unreal" -> '
+    '{"skill":"todo_add","title":"Gửi CV cho công ty unreal","urgent":true}; '
+    '"xong việc mua sách rồi" -> {"skill":"todo_done","title":"mua sách"}; '
+    '"i finished the ads update" -> {"skill":"todo_done","title":"ads update"}; '
+    '"còn việc gì chưa làm" -> {"skill":"todo_list"}; '
+    '"what\'s on my to do list" -> {"skill":"todo_list"}; '
     '"build me a flutter app" -> {"skill":"none"}; '
     '"what stock API should I use" -> {"skill":"none"}.\n\n'
     "User message: "
@@ -733,6 +774,23 @@ def _dispatch(intent, text):
         return manage.resume(intent.get("project") or text)
     if skill == "note_suggestions":
         return _note_suggestions()
+    if skill == "todo_add":
+        return _todo_add(intent.get("title") or text, intent.get("due") or "",
+                         bool(intent.get("urgent")))
+    if skill == "todo_done":
+        return _todo_done(intent.get("title") or "")
+    if skill == "todo_list":
+        return _todo_list()
+    if skill == "automation":
+        return _automation(intent.get("name") or "")
+    if skill == "calendar":
+        return _calendar_read(intent.get("when") or "", bool(intent.get("free")))
+    if skill == "calendar_add":
+        return _calendar_add(intent.get("title") or "", intent.get("when") or "",
+                             intent.get("duration"), intent.get("location") or "")
+    if skill == "calendar_edit":
+        return _calendar_edit(intent.get("title") or "", intent.get("when") or "",
+                              bool(intent.get("cancel")))
     if skill == "post_content":
         from . import content
         return content.publish(intent.get("brief") or "", intent.get("video") or "")
@@ -750,14 +808,403 @@ def _new_note(text):
     from . import notes
     text = (text or "").strip()
     if text:                                       # dictated note → save straight away
-        return notes.save_note("", text)
-    # No content → ask the UI to pop the note window (Controller handles "ui").
-    return {"say": "Opening a new note, Sir.", "show": "📝 New note", "ui": "new_note"}
+        rep = notes.save_note("", text)
+        rep["ui"] = "notes"                        # and show it in the Notes panel
+        return rep
+    # No content → just open the panel and let him write.
+    return {"say": "Opening your notes, Sir.", "show": "📝 Notes", "ui": "notes"}
 
 
 def _project_status():
     from . import planner
     return planner.project_status()
+
+
+# ── n8n automations ───────────────────────────────────────────────────────────
+def _automation(name=""):
+    """List automation workflows, or trigger one by name."""
+    from . import n8n
+    st = n8n.status()
+    running = st["state"] == "running"
+    # Listing works from n8n's own database, so the workflows are readable even
+    # while the engine is down — only TRIGGERING one needs it running.
+    wfs = n8n.workflows()
+    if not running and (name or not wfs):
+        detail = st.get("detail") or st["state"]
+        return {"say": _vi(f"n8n chưa chạy: {detail}", f"n8n isn't running: {detail}"),
+                "show": "⚙ n8n — " + detail, "ui": "automations"}
+    if not wfs:
+        why = n8n.last_error()
+        return {"say": _vi("Em chưa thấy workflow nào. Anh mở tab Automations để tạo nhé.",
+                           "No workflows yet, Sir. Open the Automations tab to build one."),
+                "show": "⚙ " + _vi("Chưa có workflow nào.", "No workflows yet.")
+                        + (f"\n({why})" if why else ""),
+                "ui": "automations"}
+    if not name:
+        act = [w for w in wfs if w["active"]]
+        return {"say": _vi(f"Anh có {len(wfs)} workflow, {len(act)} đang bật.",
+                           f"You have {len(wfs)} workflows, {len(act)} active."),
+                "show": "⚙ " + _vi("Automations", "Automations") + "\n"
+                        + "\n".join(("  ● " if w["active"] else "  ○ ") + w["name"] for w in wfs)
+                        + ("" if running else "\n" + _vi("(n8n đang tắt — bật để chạy)",
+                                                         "(n8n is stopped — start it to run these)")),
+                "ui": "automations"}
+    want = name.strip().lower()
+    hit = next((w for w in wfs if want in w["name"].lower()), None)
+    if not hit:
+        return {"say": _vi(f"Em không tìm thấy workflow “{name}”.",
+                           f"No workflow matching “{name}”, Sir."),
+                "show": "⚙ " + "\n".join("  • " + w["name"] for w in wfs), "ui": "automations"}
+    # Prefer the path the workflow actually listens on; the slugified name is
+    # only a guess and fails on anything not named after its webhook.
+    ok, resp = n8n.run_webhook(hit.get("webhook") or hit["name"].lower().replace(" ", "-"))
+    if ok:
+        return {"say": _vi(f"Đã chạy {hit['name']}.", f"Ran {hit['name']}."),
+                "show": f"⚙ {hit['name']} — " + _vi("đã chạy", "triggered"), "ui": "automations"}
+    return {"say": _vi(f"Em không chạy được {hit['name']}.", f"Couldn't trigger {hit['name']}, Sir."),
+            "show": f"⚙ {hit['name']}\n{resp}", "ui": "automations"}
+
+
+# ── TODO (Google Tasks) ───────────────────────────────────────────────────────
+def _todo_unavailable():
+    return {"say": _vi("Google Tasks chưa kết nối. Anh chạy python -m patroam.wire_gcal nhé.",
+                       "Google Tasks isn't connected yet, Sir. Run "
+                       "python -m patroam.wire_gcal once."),
+            "show": "☑ Google Tasks not connected.\nRun:  python -m patroam.wire_gcal"}
+
+
+def _todo_line(t):
+    bits = "  " + ("‼ " if t["priority"] > 1 else "! " if t["priority"] else "") + t["title"]
+    if t["when"]:
+        bits += "  — " + t["when"].replace(" · all day", "")
+    if t["overdue"]:
+        bits += "  (overdue)"
+    return bits
+
+
+def _todo_add(title, due="", urgent=False):
+    """Create a task from speech."""
+    from . import gcal
+    if not gcal.available():
+        return _todo_unavailable()
+    title = (title or "").strip()
+    if not title:
+        return {"say": _vi("Việc gì ạ?", "What's the task, Sir?"),
+                "show": "☑ " + _vi("Nói tên việc cần thêm.", "Name the task.")}
+    if urgent and not gcal._PRIORITY_RE.search(title):
+        title = "!! " + title                       # marker the sorter understands
+    when = _parse_when(due, want_range=True) if (due or "").strip() else None
+    t = gcal.create_task(title, due=when)
+    if not t:
+        return {"say": _vi("Em không thêm được việc đó.", "I couldn't add that task, Sir."),
+                "show": "☑ " + (gcal.last_error() or "failed")}
+    tail = (" — " + t["when"].replace(" · all day", "")) if t["when"] else ""
+    return {"say": _vi(f"Đã thêm: {t['title']}{tail}.", f"Added: {t['title']}{tail}."),
+            "show": "☑ " + _vi("Đã thêm", "Added") + f" — {t['title']}{tail}",
+            "ui": "todo"}
+
+
+def _todo_done(title):
+    """Tick a task off by name."""
+    from . import gcal
+    if not gcal.available():
+        return _todo_unavailable()
+    t = gcal.find_task(title)
+    if not t:
+        return {"say": _vi(f"Em không tìm thấy việc nào tên “{title}”.",
+                           f"I couldn't find a task called {title}, Sir."),
+                "show": "☑ " + _vi(f"Không có việc nào khớp “{title}”.",
+                                   f"No open task matching “{title}”."),
+                "ui": "todo"}
+    if not gcal.complete_task(t["id"], t["list_id"]):
+        return {"say": _vi("Em không tick được việc đó.", "I couldn't complete that, Sir."),
+                "show": "☑ " + (gcal.last_error() or "failed"), "ui": "todo"}
+    left = [x for x in gcal.list_tasks(limit=50)]
+    nxt = (" " + _vi(f"Tiếp theo: {left[0]['title']}.", f"Next up: {left[0]['title']}.")) if left else ""
+    return {"say": _vi(f"Xong việc {t['title']}.", f"Marked {t['title']} done.") + nxt,
+            "show": "☑ " + _vi("Hoàn thành", "Completed") + f" — {t['title']}\n"
+                    + _vi(f"Còn lại {len(left)} việc.", f"{len(left)} still open."),
+            "ui": "todo"}
+
+
+def _todo_list():
+    """What's done and what's left, in the order it should be worked."""
+    from . import gcal
+    if not gcal.available():
+        return _todo_unavailable()
+    snap = gcal.tasks_snapshot()
+    open_t, done_t, c = snap["open"], snap["done"], snap["counts"]
+    if not open_t and not done_t:
+        if snap.get("error") or gcal.last_error():
+            return {"say": _vi("Em không đọc được danh sách việc.",
+                               "I couldn't read your task list, Sir."),
+                    "show": "☑ " + (snap.get("error") or gcal.last_error()), "ui": "todo"}
+        return {"say": _vi("Anh không còn việc nào cả.", "Your task list is clear, Sir."),
+                "show": "☑ " + _vi("Không còn việc nào.", "Nothing to do."), "ui": "todo"}
+    # Spoken: recent wins first, then what matters now.
+    say = []
+    import datetime as _dt
+    cutoff = (_dt.datetime.now(tz=gcal._tz()) - _dt.timedelta(days=2)).isoformat()
+    just = [d for d in done_t if d["completed_at"] and d["completed_at"] >= cutoff]
+    if just:
+        say.append(_vi(f"Anh vừa xong {len(just)} việc: " + "; ".join(d["title"] for d in just[:3]) + ".",
+                       f"You recently finished {len(just)}: " + "; ".join(d["title"] for d in just[:3]) + "."))
+    if c.get("overdue"):
+        say.append(_vi(f"{c['overdue']} việc đã quá hạn.", f"{c['overdue']} overdue."))
+    if open_t:
+        top = open_t[:3]
+        say.append(_vi("Ưu tiên bây giờ: " + "; ".join(t["title"] for t in top) + ".",
+                       "Up next: " + "; ".join(t["title"] for t in top) + "."))
+        if len(open_t) > 3:
+            say.append(_vi(f"Còn {len(open_t) - 3} việc nữa.", f"{len(open_t) - 3} more after that."))
+    # Shown: the full ordered list.
+    L = ["☑ " + _vi("VIỆC CẦN LÀM", "TO DO") + f" — {c.get('open', 0)} open"
+         + (f" · {c['overdue']} overdue" if c.get("overdue") else "")]
+    for name, sel in (("Overdue", lambda t: t["overdue"]),
+                      ("Today", lambda t: not t["overdue"] and t["today"]),
+                      ("Upcoming", lambda t: not t["overdue"] and not t["today"] and t["due"]),
+                      ("No due date", lambda t: not t["due"])):
+        rows = [t for t in open_t if sel(t)]
+        if rows:
+            L += ["", name + f" ({len(rows)})"] + [_todo_line(t) for t in rows[:8]]
+    if just:
+        L += ["", _vi("Vừa hoàn thành", "Just completed")] + ["  ✓ " + d["title"] for d in just[:5]]
+    return {"say": " ".join(say), "show": "\n".join(L), "ui": "todo"}
+
+
+# ── Google Calendar ───────────────────────────────────────────────────────────
+def _cal_unavailable():
+    return {"say": "Google Calendar isn't connected yet, Sir. Run "
+                   "python -m patroam.wire_gcal once and I'll take it from there.",
+            "show": "📅 Google Calendar not connected.\n"
+                    "Run:  python -m patroam.wire_gcal"}
+
+
+def _cal_error(lead):
+    """Report WHY a calendar call failed — the API tells us plainly, so pass it on
+    instead of a generic 'failed' that leaves nothing to act on."""
+    from . import gcal
+    why = gcal.last_error()
+    return {"say": lead + ((" " + why.splitlines()[0]) if why else ""),
+            "show": "📅 " + lead + (("\n" + why) if why else "")}
+
+
+def _parse_when(phrase, want_range=False):
+    """Turn a spoken time phrase into a datetime — via the model, so English and
+    Vietnamese ("thứ 3 lúc 10 giờ sáng") work without hand-written patterns.
+    Returns a datetime, or None. `want_range` asks for a whole-day answer."""
+    import datetime as _dt
+    from . import llm
+    phrase = (phrase or "").strip()
+    now = _dt.datetime.now()
+    if not phrase:
+        return now
+    if not llm.available():
+        return now
+    prompt = (
+        "Convert the time expression to an absolute local datetime.\n"
+        f"NOW is {now.strftime('%Y-%m-%d %H:%M')} ({now.strftime('%A')}).\n"
+        "Return ONLY JSON: {\"iso\":\"YYYY-MM-DDTHH:MM\"}. "
+        "If no clock time is given, use "
+        + ("00:00" if want_range else "09:00") + ". "
+        "Weekday names mean the NEXT such day (today counts if still ahead).\n"
+        # ensure_ascii=False: keep Vietnamese readable ("thứ 3 lúc 10 giờ sáng"),
+        # not escaped to \uXXXX, so the model parses it reliably.
+        "Expression: " + json.dumps(phrase, ensure_ascii=False))
+    raw = llm.complete(prompt, timeout=15) or ""
+    try:
+        i, j = raw.find("{"), raw.rfind("}")
+        iso = (json.loads(raw[i:j + 1]) if i >= 0 and j > i else {}).get("iso", "")
+        return _dt.datetime.fromisoformat(iso) if iso else None
+    except Exception:
+        return None
+
+
+def _fmt_events(evs, header):
+    if not evs:
+        return None
+    lines = [header]
+    for e in evs:
+        bit = f"  • {e['when']} — {e['title']}"
+        if e.get("location"):
+            bit += f" ({e['location']})"
+        lines.append(bit)
+    return "\n".join(lines)
+
+
+def _calendar_read(when, free=False):
+    """What's on the calendar, or when the user is free."""
+    from . import gcal
+    if not gcal.available():
+        return _cal_unavailable()
+    day = _parse_when(when, want_range=True) or __import__("datetime").datetime.now()
+    if free:
+        slots = gcal.free_slots(day, config.WORK_START_HOUR, config.WORK_END_HOUR)
+        if not slots:
+            return {"say": f"You're fully booked {when or 'today'}, Sir.",
+                    "show": "📅 No free slots.", "ui": "calendar"}
+        say = "You're free " + "; ".join(s["when"] for s in slots[:3]) + "."
+        return {"say": say, "show": "📅 Free slots\n" +
+                "\n".join("  • " + s["when"] for s in slots), "ui": "calendar"}
+    # A single day if they named one, else the week ahead.
+    wide = not when or when.lower() in ("this week", "next week", "week", "tuần này", "tuần sau")
+    evs = gcal.list_events(days=7 if wide else 1, start=day)
+    tasks = gcal.list_tasks()          # Google Tasks — a separate API from events
+    if not evs and not tasks:
+        # Empty could mean "free" OR "the call failed" — don't report a silent
+        # failure as an empty calendar.
+        if gcal.last_error():
+            return _cal_error("I couldn't read your calendar, Sir.")
+        return {"say": f"Nothing on your calendar {when or 'today'}, Sir.",
+                "show": "📅 Nothing scheduled.", "ui": "calendar"}
+    show = _fmt_events(evs, f"📅 {when or 'Upcoming'}") or ""
+    if tasks:
+        show += ("\n\n" if show else "") + "☑ Tasks\n" + "\n".join(
+            f"  • {t['title']}" + (f" — {t['when']}" if t["when"] else "")
+            for t in tasks[:8])
+    bits = []
+    if evs:
+        head = "; ".join(f"{e['title']} {e['when'].lower()}" for e in evs[:3])
+        more = len(evs) - 3
+        bits.append(_vi("Anh có " + head + (f", và {more} việc nữa" if more > 0 else ""),
+                        "You have " + head + (f", and {more} more" if more > 0 else "")))
+    if tasks:
+        bits.append(_vi(f"{len(tasks)} việc đang mở, tiếp theo là " + tasks[0]["title"],
+                        f"{len(tasks)} task" + ("s" if len(tasks) != 1 else "")
+                        + " open, next is " + tasks[0]["title"]))
+    return {"say": ". ".join(bits) + ".", "show": show, "ui": "calendar"}
+
+
+def _calendar_add(title, when, duration=None, location=""):
+    """Schedule a new event."""
+    from . import gcal
+    if not gcal.available():
+        return _cal_unavailable()
+    try:
+        mins = int(duration) if duration else 60
+    except (TypeError, ValueError):
+        mins = 60
+    # Missing pieces must be REMEMBERED, not just asked about: previously PATROAM
+    # said "Name the event." and kept no state, so the user's answer fell through
+    # to the chat model and the event was never created.
+    if not title:
+        _PENDING_ADD.clear()
+        _PENDING_ADD.update({"when": when, "minutes": mins, "location": location})
+        return {"say": _vi("Sự kiện tên là gì ạ?", "What should I call it, Sir?"),
+                "show": "📅 " + _vi("Đặt tên cho sự kiện:", "Name the event:"),
+                "offer": "cal_slot"}
+    # An empty time must be ASKED for, never silently defaulted to "now" — that
+    # quietly books the event at whatever o'clock it happens to be.
+    start = _parse_when(when) if (when or "").strip() else None
+    if not start:
+        _PENDING_ADD.clear()
+        _PENDING_ADD.update({"title": title, "minutes": mins, "location": location})
+        return {"say": _vi(f"“{title}” vào lúc nào ạ?", f"When is “{title}”, Sir?"),
+                "show": "📅 " + _vi(f"“{title}” — vào ngày giờ nào?",
+                                    f"“{title}” — what date and time?"),
+                "offer": "cal_slot"}
+    # Warn BEFORE booking: silently stacking a second thing on an occupied hour
+    # is worse than asking.
+    import datetime as _dt
+    clash = gcal.conflicts(start, start + _dt.timedelta(minutes=mins))
+    if clash:
+        _PENDING_EVENT.clear()
+        _PENDING_EVENT.update({"title": title, "start": start, "minutes": mins,
+                               "location": location})
+        names = "; ".join(f"{c['title']} ({c['when']})" for c in clash[:3])
+        w = gcal._human(start, start + _dt.timedelta(minutes=mins))
+        return {"say": _vi(f"Trùng lịch với “{clash[0]['title']}” cùng giờ rồi anh. Vẫn thêm chứ ạ?",
+                           f"That clashes with {clash[0]['title']} at the same time, Sir. "
+                           "Shall I add it anyway?"),
+                "show": "⚠️ " + _vi("Trùng lịch — anh đã có:", "Conflict — you already have:")
+                        + f"\n  • {names}\n\n"
+                        + _vi(f"Vẫn thêm “{title}” lúc {w} chứ?", f"Add “{title}” at {w} anyway?"),
+                "offer": "cal_add"}
+    return _do_add(title, start, mins, location)
+
+
+# An event held back because it clashed; a following "yes" books it.
+_PENDING_EVENT = {}
+# A half-specified event waiting for its missing title or time.
+_PENDING_ADD = {}
+
+
+def _vi(vietnamese, english):
+    """Reply in whichever language PATROAM is currently set to."""
+    return vietnamese if (config.RESPONSE_LANGUAGE or "").lower().startswith("viet") \
+        else english
+
+
+def supply_event_slot(text):
+    """The user just answered "what's it called?" / "when?" — fill the gap and
+    finish booking. Returns a reply dict, or None if nothing was pending."""
+    if not _PENDING_ADD:
+        return None
+    p = dict(_PENDING_ADD)
+    _PENDING_ADD.clear()
+    answer = (text or "").strip()
+    if not answer:
+        return None
+    if not p.get("title"):
+        p["title"] = answer.strip(' "“”')
+    else:
+        p["when"] = answer
+    return _calendar_add(p.get("title", ""), p.get("when", ""),
+                         p.get("minutes"), p.get("location", ""))
+
+
+def cancel_event_slot():
+    _PENDING_ADD.clear()
+
+
+def _do_add(title, start, mins, location=""):
+    from . import gcal
+    ev = gcal.create_event(title, start, duration_minutes=mins, location=location)
+    if not ev:
+        return _cal_error("I couldn't add that to your calendar, Sir.")
+    return {"say": _vi(f"Đã thêm {ev['title']}, {ev['when'].lower()}.",
+                       f"Added {ev['title']}, {ev['when'].lower()}."),
+            "show": "📅 " + _vi("Đã thêm", "Added") + f" — {ev['title']}\n  {ev['when']}"
+                    + (f"\n  {ev['location']}" if ev.get("location") else "")}
+
+
+def confirm_pending_event():
+    """Book the event that was held back for a conflict. Returns a reply, or None."""
+    if not _PENDING_EVENT:
+        return None
+    p = dict(_PENDING_EVENT)
+    _PENDING_EVENT.clear()
+    return _do_add(p["title"], p["start"], p["minutes"], p.get("location", ""))
+
+
+def cancel_pending_event():
+    _PENDING_EVENT.clear()
+
+
+def _calendar_edit(title, when, cancel=False):
+    """Move, rename or cancel an existing event."""
+    from . import gcal
+    if not gcal.available():
+        return _cal_unavailable()
+    ev = gcal.find_event(title)
+    if not ev:
+        return {"say": f"I couldn't find an event called {title}, Sir.",
+                "show": f"📅 No upcoming event matching '{title}'."}
+    if cancel:
+        ok = gcal.delete_event(ev["id"])
+        if not ok:
+            return _cal_error("I couldn't cancel that, Sir.")
+        return {"say": f"Cancelled {ev['title']}.",
+                "show": f"📅 Cancelled — {ev['title']} ({ev['when']})"}
+    start = _parse_when(when) if when else None
+    if not start:
+        return {"say": f"When should I move {ev['title']} to, Sir?",
+                "show": f"📅 {ev['title']} is {ev['when']}. Give me a new time."}
+    new = gcal.update_event(ev["id"], start=start)
+    if not new:
+        return _cal_error("I couldn't move that, Sir.")
+    return {"say": f"Moved {new['title']} to {new['when'].lower()}.",
+            "show": f"📅 Moved — {new['title']}\n  was {ev['when']}\n  now {new['when']}"}
 
 
 def _note_suggestions():

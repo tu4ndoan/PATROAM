@@ -12,19 +12,50 @@ import tempfile
 from datetime import datetime
 
 
+SECRETS_FILE = os.path.join(os.path.expanduser("~"), ".patroam", "secrets.json")
+
+
+def read_secrets():
+    """Everything in secrets.json ({} if there is no file yet)."""
+    try:
+        with open(SECRETS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_secret(key, value):
+    """Write one secret to secrets.json and make it live immediately.
+
+    Anything the UI collects — an MCP server's API key, a token — lands here
+    rather than in mcp.json, which stays shareable: the config refers to the
+    secret by name (${MCP_FOO_TOKEN}) and only this file holds the value.
+    """
+    key = (key or "").strip()
+    if not key:
+        return False
+    data = read_secrets()
+    if value in (None, ""):
+        data.pop(key, None)
+        os.environ.pop(key, None)
+    else:
+        data[key] = str(value)
+        os.environ[key] = str(value)      # not setdefault: a new value must win
+    os.makedirs(os.path.dirname(SECRETS_FILE), exist_ok=True)
+    tmp = SECRETS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, SECRETS_FILE)          # atomic: never a half-written key file
+    return True
+
+
 def _load_secrets():
     """Load secrets from ~/.patroam/secrets.json into the environment (without
     overriding real env vars). Keeps API keys/tokens OUT of tracked source."""
-    path = os.path.join(os.path.expanduser("~"), ".patroam", "secrets.json")
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return
-    if isinstance(data, dict):
-        for k, v in data.items():
-            if v not in (None, ""):
-                os.environ.setdefault(k, str(v))
+    for k, v in read_secrets().items():
+        if v not in (None, ""):
+            os.environ.setdefault(k, str(v))
 
 
 _load_secrets()
@@ -122,10 +153,13 @@ NEWS_WATCH_INTERESTS_ONLY = os.environ.get(
     "PATROAM_NEWS_WATCH_INTERESTS_ONLY", "1") not in ("0", "false", "False", "")
 NEWS_SEEN_FILE = os.path.join(os.path.expanduser("~"), ".patroam", "news_seen.json")
 
-# ── Launch briefing (project progress + notes review + "what's up") on startup ────
-LAUNCH_BRIEFING = os.environ.get("PATROAM_LAUNCH_BRIEFING", "1") not in ("0", "false", "False", "")
-# Also brief each time you wake PATROAM with the wake word (you can barge-in to skip).
-BRIEF_ON_WAKE = os.environ.get("PATROAM_BRIEF_ON_WAKE", "1") not in ("0", "false", "False", "")
+# ── Briefing (project progress + notes review + "what's up") ─────────────────────
+# Only ever on request — "brief me" / "briefing". Neither opening the app nor
+# saying the wake word is a request for one. Set the env vars to 1 to bring the
+# automatic ones back.
+LAUNCH_BRIEFING = os.environ.get("PATROAM_LAUNCH_BRIEFING", "0") not in ("0", "false", "False", "")
+# Nor on wake: saying the name is getting my attention, not asking for a report.
+BRIEF_ON_WAKE = os.environ.get("PATROAM_BRIEF_ON_WAKE", "0") not in ("0", "false", "False", "")
 # Min seconds between wake-briefings (0 = every wake). Within the gap you just get a greeting.
 BRIEF_ON_WAKE_COOLDOWN = int(os.environ.get("PATROAM_BRIEF_WAKE_COOLDOWN", "0"))
 # Snapshot of last session's state, for "since our last session…" deltas.
@@ -234,6 +268,19 @@ CONTENT_UPLOAD_URLS = {
 CLICKUP_API_TOKEN = os.environ.get("CLICKUP_API_TOKEN", "")
 CLICKUP_SPACE_ID = os.environ.get("CLICKUP_SPACE_ID", "")
 
+# ── Google Calendar (read / add / move / cancel events) ───────────────────────────
+# OAuth credentials from a Google Cloud project with the Calendar API enabled.
+# Run `python -m patroam.wire_gcal` once — it can reuse the YouTube OAuth client
+# in the same project, so usually you only re-consent (no new client needed).
+GCAL_CLIENT_ID = os.environ.get("GCAL_CLIENT_ID", "")
+GCAL_CLIENT_SECRET = os.environ.get("GCAL_CLIENT_SECRET", "")
+GCAL_REFRESH_TOKEN = os.environ.get("GCAL_REFRESH_TOKEN", "")
+# IANA name (e.g. "Asia/Ho_Chi_Minh"). Empty = use the machine's local timezone.
+TIMEZONE = os.environ.get("PATROAM_TIMEZONE", "")
+# Working day used for "when am I free?"
+WORK_START_HOUR = int(os.environ.get("PATROAM_WORK_START", "9"))
+WORK_END_HOUR = int(os.environ.get("PATROAM_WORK_END", "18"))
+
 # ── Projects (professional planning / creation / management) ──────────────────────
 # Where your code projects live (the Planner creates new project folders here and
 # reads them for "where were we?"). git init only — you push manually.
@@ -260,16 +307,87 @@ SSI_DATA_URL = os.environ.get("SSI_DATA_URL", "https://fc-data.ssi.com.vn/")
 WAKE_PHRASES = [
     "patroam", "hey patroam",
     "patrom", "patroum", "patroan", "patriam", "patron", "petroam", "patram",
+    "patrol", "hey patrol", "pay trom", "pa trom", "patch rom",
     "hey bro", "hey dude",
     "hey agent p", "agent p", "hey agent pea", "agent pea",
     "hey p", "hey pea", "hey pee", "hey peep",
+    # Real mishearings seen in ~/.patroam/startup.log — English STT has no word
+    # for "patroam", so it substitutes whatever sounds closest.
+    "hey pay", "hey pat", "hey patch", "hey pa", "hey paul", "hey pot",
+    "hey palm", "hey bun", "high bun", "hey bond", "hey pam", "hey ram",
 ]
-# How close a heard phrase must be to a wake phrase to count (0–1).
-WAKE_WORD_FUZZ = 0.78
+# How close a heard phrase must be to a wake phrase to count (0–1). Loose on
+# purpose: a missed wake word is worse than an occasional false trigger.
+WAKE_WORD_FUZZ = float(os.environ.get("PATROAM_WAKE_FUZZ", "0.72"))
+
+# ── Realtime voice (continuous listening, streaming, barge-in) ───────────────────
+# Runs alongside the classic voice path, which stays as the fallback.
+REALTIME_VOICE = os.environ.get("PATROAM_REALTIME", "0") not in ("0", "false", "False", "")
+# Backends — each swappable without touching the pipeline.
+REALTIME_STT = os.environ.get("PATROAM_RT_STT", "groq")      # groq | local
+REALTIME_TTS = os.environ.get("PATROAM_RT_TTS", "edge")      # edge | piper
+REALTIME_LLM = os.environ.get("PATROAM_RT_LLM", "groq")      # groq | ollama
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_TEXT_MODEL = os.environ.get("PATROAM_GEMINI_TEXT", "gemini-3.6-flash")
+# Which model composes the spoken answers behind the voice tools. Chosen from the
+# title-bar dropdown; each is a real trade-off (speed vs. one-provider vs. local).
+WORKER_MODEL = os.environ.get("PATROAM_WORKER", "groq")   # groq | ollama | gemini
+
+
+def set_worker(name):
+    global WORKER_MODEL
+    if name in ("groq", "ollama", "gemini"):
+        WORKER_MODEL = name
+    return WORKER_MODEL
+# Speech-to-speech model. Measured: 236 ms from end-of-speech to first audio,
+# vs 1997 ms for gemini-2.5-flash-native-audio.
+REALTIME_MODEL = os.environ.get("PATROAM_RT_MODEL", "models/gemini-3.1-flash-live-preview")
+# Voice for the realtime model. Male: Puck, Charon, Fenrir, Orus.
+# Female: Kore, Aoede, Leda, Zephyr. Must be pinned — left unset, Gemini picks a
+# different one per session and PATROAM changes gender mid-conversation.
+REALTIME_VOICE = os.environ.get("PATROAM_RT_VOICE", "Charon")
+# Accent of the spoken English. en-GB gives the British butler register;
+# leaving it empty lets Gemini decide (it tends to American).
+REALTIME_LANG_CODE = os.environ.get("PATROAM_RT_ACCENT", "en-GB")
+GROQ_MODEL = os.environ.get("PATROAM_GROQ_MODEL", "llama-3.3-70b-versatile")
+# How long a pause must last before your turn counts as finished. 300 ms is the
+# measured sweet spot: 200 ms cut sentences in half, 550 ms felt sluggish.
+REALTIME_END_SILENCE_MS = int(os.environ.get("PATROAM_RT_END_SILENCE", "300"))
+
+# ── n8n (workflow automation, started alongside PATROAM) ─────────────────────────
+# Runs as a local Node process (npm install -g n8n) — no Docker. Bound to
+# 127.0.0.1 only; nothing is exposed to the network.
+N8N_ENABLED = os.environ.get("PATROAM_N8N", "1") not in ("0", "false", "False", "")
+N8N_PORT = int(os.environ.get("N8N_PORT", "5678"))
+N8N_DIR = os.environ.get("PATROAM_N8N_DIR",
+                         os.path.join(os.path.expanduser("~"), ".patroam", "n8n"))
+N8N_LOG = os.path.join(os.path.expanduser("~"), ".patroam", "n8n.log")
+# Optional API key (n8n → Settings → API) so PATROAM can list/trigger workflows.
+N8N_API_KEY = os.environ.get("N8N_API_KEY", "")
+
+# ── Knowledge graph ──────────────────────────────────────────────────────────────
+# Facts the MODEL proposes that would create an entity the graph has never seen
+# wait for your approval first. Filesystem facts (real repos, project structure),
+# notes you write and links you add by hand are trusted and go straight in.
+# Set PATROAM_CONFIRM_NODES=0 to let the model add nodes unattended.
+CONFIRM_NEW_NODES = os.environ.get("PATROAM_CONFIRM_NODES", "1") not in ("0", "false", "False", "")
+
+# ── Always-on mode (no wake word) ────────────────────────────────────────────────
+# When on, PATROAM acts on what you say without "hey patroam". Every utterance
+# goes through the attention gate (voice/attention.py), which asks the model
+# whether you were talking TO it and wanted something done — so thinking aloud,
+# rhetorical questions and talking to someone else are ignored.
+# The wake word still works, and always bypasses the gate.
+# Set PATROAM_ALWAYS_ON=0 to go back to requiring "hey patroam".
+VOICE_ALWAYS_ON = os.environ.get("PATROAM_ALWAYS_ON", "1") not in ("0", "false", "False", "")
+# Seconds allowed for the gate's judgement. Measured 2.7–4.3s on a cloud model,
+# so keep headroom — too tight and every verdict times out into "ignore".
+ATTENTION_TIMEOUT = float(os.environ.get("PATROAM_ATTENTION_TIMEOUT", "8"))
 
 # Silence (seconds) before the recognizer emits a captured chunk. Kept short so
 # chunks arrive quickly — smart endpointing (below) decides if you're FINISHED.
-PAUSE_THRESHOLD = float(os.environ.get("PATROAM_PAUSE_THRESHOLD", "0.6"))
+PAUSE_THRESHOLD = float(os.environ.get("PATROAM_PAUSE_THRESHOLD", "0.9"))
 # Hard cap (seconds) on a single captured chunk, so it can't listen forever.
 PHRASE_TIME_LIMIT = float(os.environ.get("PATROAM_PHRASE_LIMIT", "30"))
 # Minimum seconds of speech before a phrase is considered (filters stray clicks).
@@ -279,9 +397,11 @@ PHRASE_THRESHOLD = float(os.environ.get("PATROAM_PHRASE_THRESHOLD", "0.3"))
 # After each chunk, PATROAM waits a grace period for you to continue. The grace
 # adapts to whether the phrase looks finished — so trailing off on "and…/to…"
 # keeps it listening, while a finished sentence is acted on quickly.
-ENDPOINT_COMPLETE_GRACE = float(os.environ.get("PATROAM_GRACE_COMPLETE", "0.9"))
-ENDPOINT_AMBIGUOUS_GRACE = float(os.environ.get("PATROAM_GRACE_AMBIGUOUS", "1.6"))
-ENDPOINT_INCOMPLETE_GRACE = float(os.environ.get("PATROAM_GRACE_INCOMPLETE", "2.4"))
+# Generous by default: being cut off mid-thought is far more annoying than
+# waiting an extra second. Lower these if PATROAM feels sluggish to answer.
+ENDPOINT_COMPLETE_GRACE = float(os.environ.get("PATROAM_GRACE_COMPLETE", "1.5"))
+ENDPOINT_AMBIGUOUS_GRACE = float(os.environ.get("PATROAM_GRACE_AMBIGUOUS", "2.2"))
+ENDPOINT_INCOMPLETE_GRACE = float(os.environ.get("PATROAM_GRACE_INCOMPLETE", "3.0"))
 # Absolute cap (seconds) on how long one command may accumulate.
 ENDPOINT_MAX_WAIT = float(os.environ.get("PATROAM_ENDPOINT_MAX", "15"))
 # Consult the LLM to judge completeness for genuinely ambiguous (short) phrases.
@@ -364,6 +484,33 @@ def load_mcp_servers():
         data = data.get("servers", [])
     return data if isinstance(data, list) else []
 
+
+def save_mcp_servers(servers):
+    """Persist the server list (what the MCP panel edits)."""
+    os.makedirs(os.path.dirname(MCP_FILE), exist_ok=True)
+    tmp = MCP_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"servers": list(servers)}, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, MCP_FILE)
+    return True
+
+
+_SECRET_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def expand_secrets(value):
+    """Replace ${NAME} with the secret/env value, anywhere in a config tree.
+
+    Server configs keep placeholders so mcp.json can be read, copied or shared
+    without leaking a key; the real values are only ever in secrets.json."""
+    if isinstance(value, str):
+        return _SECRET_REF.sub(lambda m: os.environ.get(m.group(1), m.group(0)), value)
+    if isinstance(value, dict):
+        return {k: expand_secrets(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [expand_secrets(v) for v in value]
+    return value
+
 # ── Language ───────────────────────────────────────────────────────────────────
 # The language PATROAM replies in. Set permanently with PATROAM_LANGUAGE, or
 # switch live by saying "reply in Vietnamese" / "trả lời bằng tiếng Việt".
@@ -426,7 +573,9 @@ SPEAK_SUMMARY = os.environ.get("PATROAM_SPEAK_SUMMARY", "1") not in ("0", "false
 SPEAK_SUMMARY_CHARS = int(os.environ.get("PATROAM_SPEAK_SUMMARY_CHARS", "240"))
 
 # ── Persona ──────────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """You are PATROAM, the user's personal AI assistant — warm, natural, and genuinely conversational — who is also a capable software engineer and knowledge agent.
+SYSTEM_PROMPT = """You are PATROAM, the user's personal butler and majordomo — in the manner of JARVIS to Tony Stark, or Alfred to Bruce Wayne — who is also a capable software engineer and knowledge agent.
+
+CHARACTER: Address him as "Sir" in English; in Vietnamese call him "cậu chủ" and refer to yourself as "tôi". Composed, dry, quietly capable — you anticipate rather than ask. Understated wit is welcome; never jokes at his expense. You are a professional in service, not a chatbot: no "How can I help you today?", no exclamation marks, no emoji, no cheerfulness for its own sake. Deliver bad news plainly and immediately; never soften a fact. Always answer in whichever language he just used.
 
 Understand what the user MEANS from ordinary conversation; never require exact command phrasing or keywords. Infer intent, ask a brief question only if truly unclear, and reply like a thoughtful human. When an intent maps to one of your tools/actions (open an app, remember something, record a relationship, switch language, create files…), quietly emit the ACTION for it AND give a short natural reply — don't make the user phrase it a special way.
 Your deeper mission is to help the user design, build, debug, maintain, and evolve software systems with maximum accuracy and minimum hallucination.
@@ -460,8 +609,8 @@ PLANNING PHASE — consult, one question at a time, using `ACTION: ask {"questio
 4) Keep going until you genuinely have enough to plan well (confidence ≥ 90%). Summarise the agreed plan back to the user.
 
 CREATION PHASE — only after the user approves the plan:
-5) Confirm logistics with `ask`: which folder/location for the project, and which ClickUp space to use.
-6) Then emit ONE `ACTION: create_project {…}` with the full brief in `description`, decisions in `choices`, `prototype` true/false, and the chosen `folder`/`clickup_space`. PATROAM writes plan.md, initialises git, creates the ClickUp list + tasks, adds it to the knowledge graph, and opens a private Slack dev-log channel. Report the result and the next step.
+5) Confirm logistics with `ask`, one at a time: which folder/location for the project, whether the GitHub repo should be private, public or skipped, and which ClickUp space to use.
+6) Then emit ONE `ACTION: create_project {…}` with the full brief in `description`, decisions in `choices`, `prototype` true/false, and the chosen `folder`/`github`/`clickup_space`. PATROAM writes plan.md, initialises git, creates the GitHub repo and pushes the first commit, creates the ClickUp list + tasks, adds it to the knowledge graph, and opens a private Slack dev-log channel. Report the result and the next step.
 For small, unambiguous requests (a single script/file), skip the ceremony and just do it.
 
 Act as a senior software architect, senior iOS engineer, senior backend engineer, and knowledge-management system working together. Your job is not to answer quickly — it is to help the user reach the correct solution with verifiable evidence.

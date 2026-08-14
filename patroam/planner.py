@@ -46,7 +46,7 @@ def _write(path, content):
 
 
 def _git_init(d):
-    """git init + initial commit (no remote, no push). Best-effort."""
+    """git init + initial commit (no remote yet). Best-effort."""
     try:
         if os.path.isdir(os.path.join(d, ".git")):
             return True
@@ -59,13 +59,59 @@ def _git_init(d):
         return False
 
 
+def _github_repo(d, slug, visibility="private"):
+    """Create the GitHub repo and push the first commit → {url} or {error}.
+
+    Uses the `gh` CLI, which is already signed in on this machine — no token to
+    store. Only runs when you asked for a repo; "none" skips it entirely."""
+    import shutil
+    if (visibility or "none").lower() in ("none", "no", ""):
+        return None
+    gh = shutil.which("gh")
+    if not gh:
+        return {"error": "GitHub CLI not found — install gh, or create the repo yourself."}
+    flag = "--public" if str(visibility).lower().startswith("pub") else "--private"
+    try:
+        r = subprocess.run([gh, "repo", "create", slug, flag, "--source", ".",
+                            "--remote", "origin", "--push"],
+                           cwd=d, capture_output=True, text=True, timeout=120)
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+    out = ((r.stdout or "") + (r.stderr or "")).strip()
+    if r.returncode != 0:
+        return {"error": out.splitlines()[-1][:200] if out else "gh repo create failed"}
+    url = next((w for w in out.split() if w.startswith("https://github.com/")), "")
+    return {"url": url or out[:120], "visibility": flag.lstrip("-")}
+
+
+def _plan_writer():
+    """Whichever model can actually write the plan right now.
+
+    The chat model registers itself in `llm`, but during a VOICE session there
+    may be no chat model at all — and an empty plan is what left ClickUp with a
+    list and no tasks. The realtime worker (Groq / Gemini / Ollama) is the same
+    model the voice already uses, so fall back to it rather than giving up."""
+    if llm.available():
+        return lambda prompt, timeout: llm.complete(prompt, timeout=timeout)
+    try:
+        from .realtime.llm import worker
+        w = worker()
+        if w and w.available():
+            return lambda prompt, timeout: w.complete(prompt, timeout=timeout,
+                                                      max_tokens=3000)
+    except Exception:
+        pass
+    return None
+
+
 def build_plan(name, kind="", description="", choices=None, prototype=None):
     """LLM → a full professional plan dict (empty dict if no model / parse fails)."""
-    if not llm.available():
+    write = _plan_writer()
+    if not write:
         return {}
     payload = {"project": name, "type": kind, "description": description,
                "decisions": choices or [], "prototype": prototype}
-    raw = llm.complete(_PLAN_PROMPT + json.dumps(payload, ensure_ascii=False), timeout=90)
+    raw = write(_PLAN_PROMPT + json.dumps(payload, ensure_ascii=False), 90)
     if not raw:
         return {}
     try:
@@ -126,8 +172,11 @@ def _readme(name, description, plan):
 
 
 def create_project(name, kind="", description="", choices=None, folder=None,
-                   clickup_space=None, slack=True, prototype=None):
-    """Create a project end-to-end. Returns {say, show}."""
+                   clickup_space=None, slack=True, prototype=None, github="private"):
+    """Create a project end-to-end. Returns {say, show}.
+
+    `github` is "private" / "public" / "none" — the repo is created and the
+    first commit pushed with the `gh` CLI when you asked for one."""
     name = (name or "Project").strip()
     slug = _slug(name)
     base = os.path.expanduser(str(folder).strip()) if (folder and str(folder).strip()) \
@@ -144,16 +193,26 @@ def create_project(name, kind="", description="", choices=None, folder=None,
     if not os.path.exists(gi):
         _write(gi, _GITIGNORE)
 
-    # 2) git init (no push — you push manually)
+    # 2) git init, then the GitHub repo (only if it was asked for)
     git_ok = _git_init(proj_dir)
+    gh = _github_repo(proj_dir, slug, github) if git_ok else None
 
-    # 3) ClickUp list in the chosen space
+    # 3) ClickUp list in the chosen space. An empty plan would create a list
+    #    with nothing in it, which reads as "ClickUp is broken" — so don't.
     cu = None
-    if clickup.available():
+    cu_note = ""
+    milestones = plan.get("milestones", [])
+    if not clickup.available():
+        cu_note = "⚠ ClickUp not connected (CLICKUP_API_TOKEN)."
+    elif not (milestones or plan.get("backlog")):
+        cu_note = "⚠ No roadmap to push — the planning model wasn't available."
+    else:
         space_id = clickup.resolve_space(clickup_space)
         cu = clickup.push_roadmap(
-            name, {"milestones": plan.get("milestones", []),
+            name, {"milestones": milestones,
                    "backlog": plan.get("backlog", [])}, space_id=space_id)
+        if not cu:
+            cu_note = "⚠ ClickUp push failed — check the token and the space."
 
     # 4) knowledge graph
     facts = [("USES", s) for s in (plan.get("stack") or [])]
@@ -183,6 +242,7 @@ def create_project(name, kind="", description="", choices=None, folder=None,
         name, folder=proj_dir, kind=kind, plan=os.path.join(proj_dir, "plan.md"),
         clickup_list_id=(cu or {}).get("list_id"), clickup_url=(cu or {}).get("url"),
         slack_channel_id=(ch or {}).get("id"), slack_channel=(ch or {}).get("name"),
+        github_url=(gh or {}).get("url"),
         created=datetime.date.today().isoformat())
 
     # 7) report
@@ -190,15 +250,22 @@ def create_project(name, kind="", description="", choices=None, folder=None,
     nt = sum(len(m.get("tasks", [])) for m in plan.get("milestones", []))
     nb = len(plan.get("backlog", []))
     say = (f"Project {name} is set up, Sir — plan written, {nms} milestones and {nt} tasks"
-           + (f", plus {nb} backlog items" if nb else "") + ".")
+           + (f", plus {nb} backlog items" if nb else "")
+           + (", and the GitHub repo is up" if (gh or {}).get("url") else "") + ".")
     show = (f"✅ Created **{name}**\n"
             f"📁 {proj_dir}" + ("  · git initialised" if git_ok else "") + "\n"
             f"📝 plan.md + README.md\n"
             f"Roadmap: {nms} milestones · {nt} tasks · {nb} backlog")
+    if gh and gh.get("url"):
+        show += f"\n🐙 GitHub ({gh.get('visibility', 'private')}): {gh['url']}"
+    elif gh and gh.get("error"):
+        show += f"\n⚠ GitHub: {gh['error']}"
     if cu and cu.get("url"):
         show += f"\n🔗 ClickUp: {cu['url']}"
-    elif clickup.available():
-        show += "\n⚠ ClickUp push failed — check token/space."
+    elif cu:
+        show += "\n🔗 ClickUp list created"
+    if cu_note:
+        show += "\n" + cu_note
     if ch:
         show += f"\n💬 Slack: #{ch['name']} (private)"
     return {"say": say, "show": show}

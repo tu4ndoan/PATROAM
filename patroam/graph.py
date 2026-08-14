@@ -109,14 +109,91 @@ def _save():
         pass
 
 
-def add(subject, relation, obj, confidence=1.0, doc=None):
+# ── new-node confirmation ─────────────────────────────────────────────────────
+# Facts the model PROPOSED that would introduce an entity the graph has never
+# seen. They wait here until you approve them, so a bad extraction can't quietly
+# invent nodes (this is how "Project USES Stripe" and "PATROAM USES Three.js"
+# got in). Trusted callers — real repos on disk, a note you just wrote, a link
+# you added by hand — bypass this entirely.
+_PENDING = []
+
+
+def _known_entities():
+    out = set()
+    for t in _load()["triples"]:
+        out.add(_canon(t["s"]))
+        out.add(_canon(t["o"]))
+    return out
+
+
+def pending():
+    """Proposed facts awaiting your approval (newest last)."""
+    return [dict(p) for p in _PENDING]
+
+
+def pending_nodes():
+    """Just the NEW entity names waiting for approval, deduped in order."""
+    known, out = _known_entities(), []
+    for p in _PENDING:
+        for n in (p["s"], p["o"]):
+            if _canon(n) not in known and n not in out:
+                out.append(n)
+    return out
+
+
+def approve_pending(names=None):
+    """Commit pending facts. `names` limits it to those touching those entities
+    (case/spacing-insensitive); None approves everything. Returns count added."""
+    global _PENDING
+    if not _PENDING:
+        return 0
+    keep, take = [], []
+    want = {_canon(n) for n in (names or [])}
+    for p in _PENDING:
+        if not want or _canon(p["s"]) in want or _canon(p["o"]) in want:
+            take.append(p)
+        else:
+            keep.append(p)
+    _PENDING = keep
+    n = 0
+    for p in take:
+        if add(p["s"], p["r"], p["o"], confidence=p.get("confidence", 1.0),
+               doc=p.get("doc"), trusted=True):
+            n += 1
+    return n
+
+
+def reject_pending(names=None):
+    """Discard pending facts (all, or only those touching `names`)."""
+    global _PENDING
+    before = len(_PENDING)
+    if names is None:
+        _PENDING = []
+        return before
+    want = {_canon(n) for n in names}
+    _PENDING = [p for p in _PENDING
+                if not (_canon(p["s"]) in want or _canon(p["o"]) in want)]
+    return before - len(_PENDING)
+
+
+def add(subject, relation, obj, confidence=1.0, doc=None, trusted=False):
     """Add a triple. `doc` is the source document (for grouping/clustering in the
-    visualizer); None means it came from you/conversation."""
+    visualizer); None means it came from you/conversation.
+
+    When the fact would introduce a brand-new entity and it wasn't `trusted`,
+    it is held in `pending()` for confirmation instead of being written."""
     s = _norm(subject)
     r = (relation or "").strip().upper().replace(" ", "_")
     o = _norm(obj)
     if not s or not r or not o:
         return False
+    if (not trusted) and config.CONFIRM_NEW_NODES:
+        known = _known_entities()
+        if _canon(s) not in known or _canon(o) not in known:
+            item = {"s": s, "r": r, "o": o, "confidence": confidence, "doc": doc}
+            if not any(p["s"] == s and p["r"] == r and p["o"] == o for p in _PENDING):
+                _PENDING.append(item)
+            return False        # not written yet — awaiting approval
     triples = _load()["triples"]
     for t in triples:
         if t["s"].lower() == s.lower() and t["r"] == r and t["o"].lower() == o.lower():
@@ -336,7 +413,7 @@ def summary(limit=15):
 def add_note(text):
     """Remember a free-text fact about the user (one that isn't a clean triple)."""
     text = (text or "").strip()
-    return add(USER, "NOTE", text) if text else False
+    return add(USER, "NOTE", text, trusted=True) if text else False
 
 
 def _user_facts():
@@ -436,7 +513,7 @@ def node_docs(name):
 # ── Projects & Notes (top-level containers) + backups ─────────────────────────────
 def link_under(parent, child, relation="HAS"):
     """Attach `child` under a top-level container node (Projects / Notes)."""
-    return add(parent, relation, child)
+    return add(parent, relation, child, trusted=True)
 
 
 def add_project(name, description="", facts=None, doc=None):
@@ -445,25 +522,48 @@ def add_project(name, description="", facts=None, doc=None):
     name = _norm(name)
     if not name:
         return False
-    add(PROJECTS, "HAS_PROJECT", name, doc=doc)
+    add(PROJECTS, "HAS_PROJECT", name, doc=doc, trusted=True)
     if description:
-        add(name, "DESCRIBED_AS", description.strip()[:200], confidence=0.9, doc=doc)
+        add(name, "DESCRIBED_AS", description.strip()[:200], confidence=0.9, doc=doc, trusted=True)
     for rel, obj in (facts or []):
-        add(name, rel, obj, doc=doc)
+        add(name, rel, obj, doc=doc, trusted=True)
     return True
 
 
 def add_note_entry(title, text="", facts=None, doc=None):
-    """Register a note under the Notes node (title + free text + optional facts)."""
+    """Record a note's own facts in the graph.
+
+    Notes used to hang off a "Notes" container node, with the whole body dumped
+    in as a triple. They have their own panel now, so the graph keeps only what
+    is actually knowledge — the facts extracted from a note — and no longer
+    grows a Notes hub nobody navigated through."""
     title = _norm(title)
     if not title:
         return False
-    add(NOTES, "HAS_NOTE", title, doc=doc)
-    if text:
-        add(title, "NOTE", text.strip()[:500], doc=doc)
     for rel, obj in (facts or []):
-        add(title, rel, obj, doc=doc)
+        add(title, rel, obj, doc=doc, trusted=True)
     return True
+
+
+def drop_notes_node():
+    """Remove the old Notes hub and its note-body triples (one-time cleanup)."""
+    g = _load()
+    if not _LOAD_OK:
+        return 0
+    n = NOTES.lower()
+    before = len(g["triples"])
+    g["triples"] = [t for t in g["triples"]
+                    if not (t["s"].lower() == n and t["r"] == "HAS_NOTE")
+                    and t["r"] != "NOTE"]
+    gone = before - len(g["triples"])
+    if gone:
+        # Drop any node left with no edges at all (the note titles themselves).
+        linked = {_canon(t["s"]) for t in g["triples"]} | {_canon(t["o"]) for t in g["triples"]}
+        for key in ("layout", "colors"):
+            if isinstance(g.get(key), dict):
+                g[key] = {k: v for k, v in g[key].items() if _canon(k) in linked}
+        _save()
+    return gone
 
 
 def projects():
@@ -554,7 +654,7 @@ def sync_projects():
             (t["s"].lower() == p and t["r"] == "HAS_PROJECT" and _canon(t["o"]) in stale)
             or _canon(t["s"]) in stale)]
     for r in real:
-        add(PROJECTS, "HAS_PROJECT", r["name"])
+        add(PROJECTS, "HAS_PROJECT", r["name"], trusted=True)
     _save()
     return [r["name"] for r in real]
 
@@ -585,10 +685,10 @@ def index_codebase(max_dirs=5, max_files=5):
         g["triples"] = [t for t in g["triples"] if not (
             t["r"] in ("HAS_MODULE", "KEY_FILE") and _canon(t["s"]) == pc)]
         for d in info.get("structure", [])[:max_dirs]:
-            if add(name, "HAS_MODULE", pref + d["name"], doc=name):
+            if add(name, "HAS_MODULE", pref + d["name"], doc=name, trusted=True):
                 added += 1
         for f in info.get("key_files", [])[:max_files]:
-            if add(name, "KEY_FILE", pref + f["name"], doc=name):
+            if add(name, "KEY_FILE", pref + f["name"], doc=name, trusted=True):
                 added += 1
     _save()
     return added
@@ -609,7 +709,8 @@ def index_notes():
         txt = _read_text(os.path.join(nd, f))
         title = _notes.title_of(txt, os.path.splitext(f)[0])   # real title (keeps Vietnamese)
         body = _notes._body(txt)
-        add_note_entry(title, body or txt, doc=title)
+        # Only the FACTS inside a note reach the graph — the note itself lives
+        # in the Notes panel, which is where you actually read it.
         if fn and (body or txt).strip():
             added += extract_into(body or txt, fn, doc=title)
     return added

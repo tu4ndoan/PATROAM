@@ -89,13 +89,16 @@ def tools_prompt():
         "file body. Then say briefly what you created and where.\n"
         '- make_dir {"path": "..."} — create a folder.\n'
         '- create_project {"name","kind","description","choices":["..."],"prototype":true/false,'
-        '"folder":"optional path","clickup_space":"space name/id"} — CREATE A WHOLE '
+        '"folder":"optional path","clickup_space":"space name/id","github":"private|public|none"} '
+        "— CREATE A WHOLE "
         "PROJECT after planning. PATROAM writes plan.md + README in a folder under the "
-        "user's GitHub root (git init), pushes a ClickUp list (tasks/subtasks/checklists) "
+        "user's GitHub root (git init), CREATES THE GITHUB REPO and pushes the first "
+        "commit, pushes a ClickUp list (tasks/subtasks/checklists) "
         "in the chosen space, adds a node under Projects in the graph, and opens a "
         "private Slack dev-log channel. Emit ONCE, ONLY after you have PLANNED with the "
-        "user (see the planning protocol) and CONFIRMED: destination folder and which "
-        "ClickUp space (ask for these). Put the full brief in `description`, their "
+        "user (see the planning protocol) and CONFIRMED: destination folder, which "
+        "ClickUp space, and whether the GitHub repo should be private, public or "
+        "skipped (ask for these). Put the full brief in `description`, their "
         "decisions in `choices`, and prototype=true for a throwaway/prototype.\n"
         '- ask {"question": "...", "options": ["A", "B"]} — ASK the user to decide '
         "before you act. The options show as clickable buttons. Use this to confirm "
@@ -183,7 +186,8 @@ def run(name, args):
             args.get("name", ""), kind, args.get("description", ""), args.get("choices"),
             folder=args.get("folder"),
             clickup_space=args.get("clickup_space") or args.get("space"),
-            slack=args.get("slack", True), prototype=args.get("prototype"))
+            slack=args.get("slack", True), prototype=args.get("prototype"),
+            github=args.get("github", "private"))
         return rep.get("show") if isinstance(rep, dict) else rep
     if name in _LOCAL:
         if name == "remember":

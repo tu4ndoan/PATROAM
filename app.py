@@ -96,10 +96,12 @@ def _run_tk():
 
 
 def _start_mcp():
-    # Connect to configured MCP connectors (e.g. Meta Ads) in the background.
+    # Connect to configured MCP connectors in the background. Never on the
+    # startup path itself: an OAuth server can sit waiting on a sign-in for
+    # minutes, and nothing else may wait for it.
     try:
         from patroam.mcp_client import get_mcp
-        threading.Thread(target=get_mcp().start, daemon=True).start()
+        get_mcp().start_background()
     except Exception as e:
         print(f"MCP startup skipped: {e}")
 
@@ -133,6 +135,31 @@ def _backup_graph_on_launch():
         _log(f"graph backed up: {p}")
     except Exception as e:
         _log(f"graph backup skipped: {e}")
+    # Notes live in their own panel now, so the old "Notes" hub and the note
+    # bodies dumped in as triples are cleared out of the graph. After the
+    # backup, never before — this deletes triples.
+    try:
+        from patroam import graph
+        gone = graph.drop_notes_node()
+        if gone:
+            _log(f"removed {gone} Notes triples from the graph")
+    except Exception as e:
+        _log(f"notes cleanup skipped: {e}")
+
+
+def _start_n8n():
+    """Bring the automation engine up with PATROAM (background; never blocks)."""
+    try:
+        from patroam import config, n8n
+        if not config.N8N_ENABLED:
+            return
+        if not n8n.installed():
+            _log("n8n not installed (npm install -g n8n) — skipping")
+            return
+        threading.Thread(target=n8n.start, daemon=True).start()
+        _log(f"n8n starting on port {config.N8N_PORT}")
+    except Exception as e:
+        _log(f"n8n skipped: {e}")
 
 
 def _start_integrations():
@@ -169,11 +196,12 @@ def main():
               "(this prevents two voices speaking at once).")
         return
     _bootstrap()
-    #_start_mcp()
+    _start_mcp()
     #_start_daemon()  # never auto-start the headless daemon; the desktop orb
     #                   already listens. Running both = overlapping voices.
     _start_rag()
     _backup_graph_on_launch()
+    _start_n8n()
     _start_integrations()
     args = sys.argv[1:]
     if "--web" in args:

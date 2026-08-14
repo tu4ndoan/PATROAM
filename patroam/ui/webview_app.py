@@ -81,6 +81,7 @@ class Controller:
         self.session_active = False
         self.is_responding = False
         self._pending_offer = None      # e.g. "focus" after the briefing offers a playlist
+        self._rt = None                 # RealtimeSession while conversational mode is on
         self._last_brief = 0.0          # timestamp of the last briefing (wake cooldown)
         self._awaiting_answer = False   # model just asked a choice → next msg is the answer
 
@@ -127,6 +128,150 @@ class Controller:
     def _inspector_dirty(self):
         """Tell the open inspector to reload (graph/RAG may have changed)."""
         self._eval("window.patroam.inspectorChanged && window.patroam.inspectorChanged()")
+
+    # ── realtime voice ────────────────────────────────────────────────────────
+    def realtime_status(self):
+        s = getattr(self, "_rt", None)
+        if not s:
+            return {"running": False, "state": "off", "error": "",
+                    "configured": bool(config.GEMINI_API_KEY)}
+        st = s.stats()
+        st["running"] = s.running
+        st["configured"] = True
+        return st
+
+    def realtime_toggle(self):
+        """Start or stop the always-on conversational mode."""
+        s = getattr(self, "_rt", None)
+        if s and s.running:
+            s.stop()
+            self._rt = None
+            # Hand the microphone back to the classic wake-word listener.
+            if self.listener and not self.listener.listening:
+                threading.Thread(target=self.listener.start, daemon=True).start()
+            self.set_status("realtime voice off")
+            self._eval("window.patroam.realtimeChanged && window.patroam.realtimeChanged()")
+            return {"running": False}
+        if not config.GEMINI_API_KEY:
+            return {"running": False, "error": "GEMINI_API_KEY chưa được đặt"}
+        if getattr(self, "_rt_starting", False):
+            return {"running": False, "error": "đang khởi động"}   # no double session
+        self._rt_starting = True
+        from ..realtime.session import RealtimeSession
+        # Only one thing may own the microphone; park the wake-word listener.
+        try:
+            if self.listener and self.listener.listening:
+                self.listener.stop()
+        except Exception:
+            pass
+        try:
+            s = RealtimeSession(on_state=self._rt_state, on_text=self._rt_text,
+                                on_ui=self._rt_ui,
+                                # Hand over what you were already talking about.
+                                history=list(getattr(self.agent, "history", []) or []))
+            ok = s.start()
+        finally:
+            self._rt_starting = False       # always clear, or the button jams
+        if not ok:
+            self._rt = None
+            return {"running": False, "error": s.error}
+        self._rt = s
+        self.set_status("realtime voice on — cứ nói tự nhiên")
+        self._eval("window.patroam.realtimeChanged && window.patroam.realtimeChanged()")
+        return {"running": True}
+
+    def _rt_state(self, state):
+        """Session state → the orb + the status line."""
+        # The orb already knows these moods; reuse them rather than inventing new.
+        self.set_state({"listening": "listening", "thinking": "thinking",
+                        "speaking": "speaking"}.get(state, "idle"))
+        self._eval("window.patroam.realtimeState && window.patroam.realtimeState(%s)"
+                   % json.dumps(state))
+
+    def _rt_text(self, who, text):
+        """Both sides of the spoken conversation → the chat log.
+
+        The Live model only returns audio, so without the transcriptions the
+        chat window stayed empty while you talked."""
+        if who == "tool":
+            self._eval("window.patroam.realtimeTool && window.patroam.realtimeTool(%s)"
+                       % json.dumps(text))
+            return
+        if who == "detail":
+            # The full result (links, paths, task lists) — shown, never spoken.
+            self._chat_done(text)
+            return
+        if not text:
+            return
+        # Record spoken turns in the SAME history the typed chat uses, so you can
+        # switch between talking and typing mid-thought and neither side forgets.
+        try:
+            role = "user" if who == "you" else "assistant"
+            self.agent.history.append({"role": role, "content": text})
+        except Exception:
+            pass
+        if who == "you":
+            self._chat_user(text)
+        else:
+            self._chat_done(text)
+
+    def _rt_ui(self, hint):
+        """Open whatever the answer is about — spoken replies alone left the
+        screen showing something unrelated."""
+        target, _, arg = (hint or "").partition(":")
+        if target == "todo":
+            self._eval("window.patroam.openTodo && window.patroam.openTodo()")
+            self._eval("window.patroam.tasksChanged && window.patroam.tasksChanged()")
+        elif target == "calendar":
+            self._eval("window.patroam.openCalendar && window.patroam.openCalendar()")
+            self._eval("window.patroam.calendarChanged && window.patroam.calendarChanged()")
+        elif target == "notes":
+            self._eval("window.patroam.openNotes && window.patroam.openNotes()")
+            self._eval("window.patroam.notesChanged && window.patroam.notesChanged()")
+        elif target == "automations":
+            self._eval("window.patroam.openAutomations && window.patroam.openAutomations()")
+        elif target == "connectors":
+            self._eval("window.patroam.openConnectors && window.patroam.openConnectors()")
+        elif target == "graph":
+            self._eval("window.patroam.exploreFromText && "
+                       "window.patroam.exploreFromText(%s)" % json.dumps(arg or ""))
+        elif target == "project":
+            self._eval("window.patroam.focusFromText && "
+                       "window.patroam.focusFromText(%s)" % json.dumps(arg or ""))
+        elif target == "chat":
+            self._eval("window.patroam.showChat && window.patroam.showChat()")
+
+    def _ask_pending_nodes(self):
+        """If the model proposed facts that would create new nodes, surface them
+        and wait for a yes/no instead of writing them silently."""
+        try:
+            from .. import graph as _g
+            nodes = _g.pending_nodes()
+            if not nodes:
+                return False
+            facts = _g.pending()
+            vi = (config.RESPONSE_LANGUAGE or "").lower().startswith("viet")
+            lines = [("🔗 " + ("Thêm node mới vào graph?" if vi
+                               else "Add these new nodes to the graph?"))]
+            lines += ["  • " + n for n in nodes[:8]]
+            if len(nodes) > 8:
+                lines.append(f"  … +{len(nodes) - 8}")
+            lines += ["", ("Từ các quan hệ:" if vi else "From:")]
+            lines += [f"  {f['s']} —{f['r'].replace('_', ' ').lower()}→ {f['o']}"
+                      for f in facts[:6]]
+            say = (f"Em muốn thêm {len(nodes)} node mới vào graph: "
+                   + ", ".join(nodes[:3]) + ". Anh duyệt không?") if vi else \
+                  (f"I'd like to add {len(nodes)} new node"
+                   + ("s" if len(nodes) != 1 else "") + " to the graph: "
+                   + ", ".join(nodes[:3]) + ". Approve?")
+            self._pending_offer = "graph_nodes"
+            self._chat_done("\n".join(lines))
+            self.speak(say)
+            self._eval("window.patroam.graphPendingChanged && "
+                       "window.patroam.graphPendingChanged()")
+            return True
+        except Exception:
+            return False
 
     def _focus_graph(self, text):
         """Ask the inspector to focus the graph node mentioned in `text` (if any)."""
@@ -268,6 +413,10 @@ class Controller:
             self.listener.set_busy(busy)
 
     def _say_chunk(self, text):
+        # Single chokepoint for the old TTS — streamed model replies arrive here
+        # too, not only through speak(). Gemini owns the voice while it is live.
+        if self._rt and self._rt.running:
+            return
         text = text.strip()
         if not text:
             return
@@ -315,6 +464,11 @@ class Controller:
         self._say_chunk(rest)
 
     def speak(self, text):
+        # While realtime voice is on, GEMINI is the voice. Letting the old TTS
+        # speak too produced two overlapping voices — and since its voice follows
+        # RESPONSE_LANGUAGE, it was often talking Vietnamese over Gemini's English.
+        if self._rt and self._rt.running:
+            return
         self._buf = ""
         self._speaking_text = ""
         self._summarizing = False      # skill/greeting replies are spoken in full
@@ -352,6 +506,13 @@ class Controller:
             self._buf = ""
         if self.is_responding:
             return
+        # Just my name, nothing after it: he's getting my attention, not asking
+        # for anything. First time in the session that gets the introduction.
+        if text and not images and self._is_name_only(text):
+            if echo:
+                self._chat_user(text)
+            self.introduce()
+            return
         # If the model just asked a choice question, the next message is the ANSWER —
         # send it to the model to CONTINUE the conversation, don't re-route it as a
         # fresh command (that misfired: "Quick Prototype" → resume_project).
@@ -361,6 +522,60 @@ class Controller:
                 self._chat_user(text)
             self._respond(text)
             return
+        # PATROAM asked to approve new graph nodes — "yes" commits them.
+        if self._pending_offer == "graph_nodes" and text:
+            self._pending_offer = None
+            if echo:
+                self._chat_user(text)
+            from .. import graph as _g
+            vi = (config.RESPONSE_LANGUAGE or "").lower().startswith("viet")
+            if skills.is_affirmative(text):
+                n = _g.approve_pending()
+                msg = (f"Đã thêm {n} fact vào graph." if vi
+                       else f"Added {n} fact" + ("s" if n != 1 else "") + " to the graph.")
+                self._inspector_dirty()
+            else:
+                n = _g.reject_pending()
+                msg = (f"Đã bỏ qua {n} đề xuất." if vi
+                       else f"Discarded {n} proposed fact" + ("s" if n != 1 else "") + ".")
+            self._eval("window.patroam.graphPendingChanged && "
+                       "window.patroam.graphPendingChanged()")
+            self.set_status(msg)
+            self._chat_done(msg)
+            self.speak(msg)
+            return
+        # PATROAM asked for the event's missing title/time — this reply IS the
+        # answer, so complete the booking instead of sending it to the chat model.
+        if self._pending_offer == "cal_slot" and text:
+            self._pending_offer = None
+            if echo:
+                self._chat_user(text)
+            rep = skills.supply_event_slot(text)
+            if rep:
+                if rep.get("offer") in ("cal_add", "cal_slot"):
+                    self._pending_offer = rep["offer"]     # still needs an answer
+                say, show = skills.split_reply(rep)
+                self.set_status(say)
+                self._chat_done(show)
+                self.speak(say)
+                return
+        # An event was held back because it clashed — "yes" books it anyway.
+        if self._pending_offer == "cal_add" and text:
+            self._pending_offer = None
+            if echo:
+                self._chat_user(text)
+            if skills.is_affirmative(text):
+                rep = skills.confirm_pending_event()
+                if rep:
+                    say, show = skills.split_reply(rep)
+                    self.set_status(say)
+                    self._chat_done(show)
+                    self.speak(say)
+                    return
+            else:
+                skills.cancel_pending_event()
+                self.speak("Left your calendar as it is, Sir.")
+                return
         # The briefing offered the Focus playlist — honour a "yes"; any reply clears it.
         if self._pending_offer == "focus" and text:
             self._pending_offer = None
@@ -401,11 +616,17 @@ class Controller:
         data = skills.data_handle(text)
         if data is not None:
             if data:
-                if isinstance(data, dict) and data.get("ui") == "new_note":
-                    self.open_note_window()      # pop the note editor
+                if isinstance(data, dict) and data.get("ui"):
+                    # Typed and spoken answers open the SAME panels — one mapping
+                    # for both, so a skill's hint can never work by voice only.
+                    self._rt_ui(data["ui"])
                 if isinstance(data, dict) and data.get("offer") == "focus":
                     self._pending_offer = "focus"   # briefing offered the Focus playlist
                     self._last_brief = time.time()
+                if isinstance(data, dict) and data.get("offer") in ("cal_add", "cal_slot"):
+                    # cal_add  → clashed, waiting for a yes/no
+                    # cal_slot → half-specified, waiting for the title or the time
+                    self._pending_offer = data["offer"]
                 say, show = skills.split_reply(data)
                 self.set_status(say)
                 self._chat_done(show)     # chat shows links; speech omits them
@@ -549,6 +770,9 @@ class Controller:
                     self._eval("window.patroam.askWidget(%s, %s)" % (json.dumps(q), json.dumps(opts)))
             self._inspector_dirty()     # the model may have recorded a relation
             self._focus_graph(text)     # focus a node the user asked about
+            # The model may have proposed facts introducing new entities — those
+            # are held back until you approve them.
+            self._ask_pending_nodes()
             if self._pending == 0:      # nothing was spoken (e.g. empty/tts off)
                 self._set_busy(False)
                 self.rest()
@@ -618,12 +842,39 @@ class Controller:
         self._eval("window.patroam.enterWork && window.patroam.enterWork(true)")
 
     def _greet(self):
-        # On wake: give the full briefing (you can barge-in to skip), unless one ran
+        # He said the name and nothing else. The FIRST time in a session that
+        # earns a real introduction — what I do, what is connected, what to try.
+        from .. import intro
+        if not intro.already_given():
+            self.introduce()
+            return
+        # Afterwards: the full briefing (barge-in to skip), unless one ran
         # recently (cooldown) — then just a quick greeting.
         if config.BRIEF_ON_WAKE and (time.time() - self._last_brief) > config.BRIEF_ON_WAKE_COOLDOWN:
             threading.Thread(target=self._brief_local, daemon=True).start()
         else:
             self.greet()   # quick time-of-day greeting
+
+    @staticmethod
+    def _is_name_only(text):
+        """True for "patroam", "hey patroam", "patroam?" — the name and nothing
+        else. `find_command` returns "" for exactly that case, and None when the
+        name isn't there at all, so anything with a request attached is safe."""
+        try:
+            from ..voice.wakeword import find_command
+            return find_command(text) == ""
+        except Exception:
+            return False
+
+    def introduce(self):
+        """Say hello properly: capabilities, live integrations, where he stands."""
+        from .. import intro
+        rep = intro.on_name_only()
+        if rep.get("show"):
+            self._chat_done(rep["show"])
+            self._eval("window.patroam.showChat && window.patroam.showChat()")
+        self.set_status(rep["say"])
+        self.speak(rep["say"])
 
     def _on_sleep(self):
         self.session_active = False
@@ -694,6 +945,16 @@ class Controller:
         if self.listener:
             self.listener.stop()
         self.tts.stop()
+        try:
+            if self._rt:        # close the mic/websocket, don't strand the session
+                self._rt.stop()
+        except Exception:
+            pass
+        try:
+            from .. import n8n
+            n8n.stop()          # don't leave the automation engine orphaned
+        except Exception:
+            pass
         self._jsq.put(None)
 
 
@@ -749,12 +1010,13 @@ class JsApi:
         payload = {"models": [], "tts": self._c.tts_enabled, "state": self._c.resting_state()}
         if first:
             self._c.autostart()                     # start listening
-            threading.Timer(0.6, self._c.greet).start()   # time-of-day greeting
+            # No briefing on startup — launching the app isn't a request for one.
+            # It runs when you ask ("brief me") or on wake; this flag only exists
+            # for putting it back. It also never checked the flag before.
+            if config.LAUNCH_BRIEFING:
+                threading.Thread(target=self._c._launch_briefing, daemon=True).start()
             # Load models + rebuild graph OFF the UI thread; models push in when ready.
             threading.Thread(target=self._c._push_models, daemon=True).start()
-            # Launch briefing a few seconds later (its own thread).
-            threading.Timer(5.0, lambda: threading.Thread(
-                target=self._c._launch_briefing, daemon=True).start()).start()
         _dlog("ready() return")
         return payload
 
@@ -798,8 +1060,9 @@ class JsApi:
             res = notes.save_note("", text)
             self._c._chat_done(res.get("show", ""))
             self._c._inspector_dirty()
+            self._c._rt_ui("notes")          # and show it in the Notes panel
             return {"ok": bool(res.get("ok"))}
-        self._c.open_note_window()
+        self._c._rt_ui("notes")
         return {"ok": True}
 
     def send_image(self, text, image_b64):
@@ -924,6 +1187,321 @@ class JsApi:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    # ── realtime voice (Gemini Live) ──────────────────────────────────────────
+    def realtime_options(self):
+        """What the dropdowns offer: worker models and Gemini voices."""
+        try:
+            from ..realtime.llm import options as worker_options
+            return {
+                "workers": worker_options(),
+                "worker": config.WORKER_MODEL,
+                "voices": [
+                    {"id": "Charon", "label": "Charon — nam, trầm"},
+                    {"id": "Puck", "label": "Puck — nam, trẻ"},
+                    {"id": "Orus", "label": "Orus — nam, ấm"},
+                    {"id": "Fenrir", "label": "Fenrir — nam, mạnh"},
+                    {"id": "Kore", "label": "Kore — nữ"},
+                    {"id": "Aoede", "label": "Aoede — nữ, nhẹ"},
+                    {"id": "Leda", "label": "Leda — nữ, trẻ"},
+                    {"id": "Zephyr", "label": "Zephyr — nữ, sáng"},
+                ],
+                "voice": config.REALTIME_VOICE,
+                "accent": config.REALTIME_LANG_CODE,
+                "accents": [
+                    {"id": "en-GB", "label": "British"},
+                    {"id": "en-US", "label": "American"},
+                    {"id": "en-AU", "label": "Australian"},
+                    {"id": "", "label": "Tự động"},
+                ],
+            }
+        except Exception as e:
+            return {"workers": [], "voices": [], "error": str(e)}
+
+    def realtime_set(self, worker=None, voice=None, accent=None):
+        """Apply a dropdown choice. Voice/accent need a restart of the session —
+        they are fixed when the WebSocket is set up."""
+        if worker:
+            config.set_worker(worker)
+        if voice:
+            config.REALTIME_VOICE = voice
+        if accent is not None:
+            config.REALTIME_LANG_CODE = accent
+        restart = bool((voice or accent is not None) and self._rt and self._rt.running)
+        if restart:
+            self.realtime_toggle()      # off
+            self.realtime_toggle()      # on, with the new voice
+        return {"worker": config.WORKER_MODEL, "voice": config.REALTIME_VOICE,
+                "accent": config.REALTIME_LANG_CODE, "restarted": restart}
+
+    def realtime_status(self):
+        try:
+            return self._c.realtime_status()
+        except Exception as e:
+            return {"running": False, "error": str(e)}
+
+    def realtime_toggle(self):
+        try:
+            return self._c.realtime_toggle()
+        except Exception as e:
+            return {"running": False, "error": str(e)}
+
+    # ── n8n automation engine ─────────────────────────────────────────────────
+    def n8n_status(self):
+        """Where the local n8n process is up to (for the Automations panel)."""
+        try:
+            from .. import n8n
+            return n8n.status()
+        except Exception as e:
+            return {"state": "error", "detail": str(e), "url": "", "installed": False}
+
+    def n8n_start(self):
+        try:
+            from .. import n8n
+            ok = n8n.start()
+            return {"ok": bool(ok), "status": n8n.status()}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def n8n_open_window(self):
+        """Open the n8n editor in its own frameless PATROAM window (not a browser)."""
+        try:
+            import webview
+            from .. import n8n
+            webview.create_window("PATROAM · Automations", url=n8n.base_url(),
+                                  width=1280, height=860, min_size=(760, 560),
+                                  background_color="#0a0a0a", frameless=False)
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ── Notes panel ───────────────────────────────────────────────────────────
+    def notes_snapshot(self):
+        try:
+            from .. import notes
+            return notes.snapshot()
+        except Exception as e:
+            return {"notes": [], "counts": {}, "error": str(e)}
+
+    def note_save(self, title, text):
+        """Create or overwrite a note (same title = same file)."""
+        try:
+            from .. import notes
+            r = notes.save_note(title, text)
+            return {"ok": bool(r.get("ok")), "path": r.get("path", "")}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def note_rename(self, note_id, title):
+        try:
+            from .. import notes
+            return {"ok": notes.rename_note(note_id, title)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def note_delete(self, note_id):
+        try:
+            from .. import notes
+            return {"ok": notes.delete_note(note_id)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ── MCP connectors ────────────────────────────────────────────────────────
+    def mcp_list(self):
+        """Configured connectors + live status, for the MCP panel."""
+        try:
+            from ..mcp_client import MCPClient, catalog, get_mcp
+            m = get_mcp()
+            return {"servers": m.servers(), "catalog": catalog(),
+                    "tools": m.tool_names(), "sdk": MCPClient.sdk_available()}
+        except Exception as e:
+            return {"servers": [], "catalog": [], "tools": [], "sdk": False,
+                    "error": str(e)}
+
+    def mcp_add(self, spec):
+        """Add a connector. `spec` comes from the panel:
+        {name, url|command, args, transport, auth: none|oauth|key,
+         key, secret, header, prefix, client_id, client_secret}
+
+        A pasted key never reaches mcp.json — it is saved to secrets.json and
+        the server config only refers to it as ${NAME}."""
+        try:
+            from .. import config
+            from ..mcp_client import get_mcp
+            spec = dict(spec or {})
+            auth = (spec.pop("auth", "") or "").lower()
+            key = (spec.pop("key", "") or "").strip()
+            secret_name = (spec.pop("secret", "") or "").strip()
+            header = (spec.pop("header", "") or "Authorization").strip()
+            prefix = spec.pop("prefix", "") or ""
+            secrets = {}
+            if auth == "oauth":
+                spec["oauth"] = True
+                # A client secret is a credential like any other — secrets.json.
+                cs = (spec.pop("client_secret", "") or "").strip()
+                if cs:
+                    key = "MCP_" + "".join(
+                        ch if ch.isalnum() else "_"
+                        for ch in (spec.get("name") or "server")).upper() + "_CLIENT_SECRET"
+                    secrets[key] = cs
+                    spec["client_secret"] = "${" + key + "}"
+            elif key:
+                # Name the secret after the server if the catalog didn't.
+                secret_name = secret_name or ("MCP_" + "".join(
+                    ch if ch.isalnum() else "_"
+                    for ch in (spec.get("name") or "server")).upper() + "_KEY")
+                secrets[secret_name] = key
+                ref = prefix + "${" + secret_name + "}"
+                if spec.get("command"):
+                    spec.setdefault("env", {})[secret_name] = "${" + secret_name + "}"
+                else:
+                    spec.setdefault("headers", {})[header] = ref
+            elif secret_name and config.read_secrets().get(secret_name):
+                # Re-adding a server whose key is already stored.
+                ref = prefix + "${" + secret_name + "}"
+                spec.setdefault("headers", {})[header] = ref
+            spec = {k: v for k, v in spec.items() if v not in ("", None, [], {})}
+            return get_mcp().add_server(spec, secrets=secrets)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def mcp_remove(self, name):
+        try:
+            from ..mcp_client import get_mcp
+            return get_mcp().remove_server(name)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def mcp_connect(self, name):
+        """Connect (or reconnect) one server — this is what triggers the OAuth
+        window when the server wants authorization."""
+        try:
+            from ..mcp_client import get_mcp
+            return {"ok": True, "status": get_mcp().connect(name, timeout=300)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def mcp_toggle(self, name, disabled):
+        try:
+            from ..mcp_client import get_mcp
+            return get_mcp().set_disabled(name, bool(disabled))
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def mcp_sign_out(self, name):
+        """Drop a connector's stored OAuth token."""
+        try:
+            from .. import mcp_oauth
+            from ..mcp_client import get_mcp
+            get_mcp().disconnect(name)
+            return {"ok": mcp_oauth.forget(name)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ── Calendar panel (Google Calendar) ──────────────────────────────────────
+    def calendar_snapshot(self, days=14):
+        """Upcoming events grouped for the panel, plus which calendars exist."""
+        try:
+            from .. import gcal
+            if not gcal.available():
+                return {"events": [], "calendars": [], "counts": {},
+                        "error": "Google Calendar isn't connected. Run: "
+                                 "python -m patroam.wire_gcal"}
+            evs = gcal.list_events(days=int(days), limit=60)
+            import datetime
+            today = datetime.datetime.now(tz=gcal._tz()).date()
+            for e in evs:
+                d = gcal._parse(e["start"])
+                e["day"] = d.date().isoformat() if d else ""
+                e["is_today"] = bool(d and d.date() == today)
+                e["time"] = "" if e["all_day"] else (d.strftime("%H:%M") if d else "")
+            return {"events": evs, "calendars": gcal.calendars(),
+                    "counts": {"total": len(evs),
+                               "today": len([e for e in evs if e["is_today"]])}}
+        except Exception as e:
+            return {"events": [], "calendars": [], "counts": {}, "error": str(e)}
+
+    def calendar_add(self, title, when_text, duration=60, location=""):
+        try:
+            from .. import gcal, skills
+            start = skills._parse_when(when_text) if (when_text or "").strip() else None
+            if not start:
+                return {"ok": False, "error": "Không hiểu thời gian: " + str(when_text)}
+            try:
+                mins = int(duration or 60)
+            except (TypeError, ValueError):
+                mins = 60
+            clash = gcal.conflicts(start, start + __import__("datetime").timedelta(minutes=mins))
+            ev = gcal.create_event(title, start, duration_minutes=mins, location=location)
+            if not ev:
+                return {"ok": False, "error": gcal.last_error() or "create failed"}
+            return {"ok": True, "event": ev,
+                    "clash": [c["title"] for c in clash]}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def calendar_delete(self, event_id, calendar_id="primary"):
+        try:
+            from .. import gcal
+            return {"ok": bool(gcal.delete_event(event_id, calendar_id))}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ── TODO panel (Google Tasks) ─────────────────────────────────────────────
+    def tasks_snapshot(self):
+        """Open tasks in working order + recently completed, for the TODO tab."""
+        try:
+            from .. import gcal
+            if not gcal.available():
+                return {"open": [], "done": [], "counts": {}, "lists": [],
+                        "error": "Google Tasks isn't connected. Run: "
+                                 "python -m patroam.wire_gcal"}
+            snap = gcal.tasks_snapshot()
+            if not snap["open"] and not snap["done"] and gcal.last_error():
+                snap["error"] = gcal.last_error()
+            return snap
+        except Exception as e:
+            return {"open": [], "done": [], "counts": {}, "lists": [], "error": str(e)}
+
+    def task_add(self, title, due_text="", notes=""):
+        """Add a task. `due_text` is free text ("tomorrow", "thứ 6") — parsed by
+        the same model-based date reader the calendar uses."""
+        try:
+            from .. import gcal, skills
+            due = skills._parse_when(due_text) if (due_text or "").strip() else None
+            t = gcal.create_task(title, due=due, notes=notes)
+            if not t:
+                return {"ok": False, "error": gcal.last_error() or "create failed"}
+            return {"ok": True, "task": t}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def task_done(self, task_id, done=True):
+        try:
+            from .. import gcal
+            ok = gcal.complete_task(task_id) if done else gcal.reopen_task(task_id)
+            return {"ok": bool(ok), "error": "" if ok else gcal.last_error()}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def task_delete(self, task_id):
+        try:
+            from .. import gcal
+            return {"ok": bool(gcal.delete_task(task_id))}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def task_update(self, task_id, title=None, due_text=None):
+        try:
+            from .. import gcal, skills
+            due = None
+            if due_text is not None:
+                due = skills._parse_when(due_text) if due_text.strip() else False
+            ok = gcal.update_task(task_id, title=title,
+                                  due=(None if due is None else (due or None)))
+            return {"ok": bool(ok), "error": "" if ok else gcal.last_error()}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def get_project_names(self):
         """Names linked under the graph's Projects node — so the UI knows which
         graph nodes should open the project view."""
@@ -998,8 +1576,31 @@ class JsApi:
 
     def graph_add(self, subject, relation, obj):
         try:
-            ok = graph.add(subject, relation or "RELATED_TO", obj)
+            # You typed this link yourself — no confirmation needed.
+            ok = graph.add(subject, relation or "RELATED_TO", obj, trusted=True)
             return {"ok": bool(ok)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ── new-node approvals ────────────────────────────────────────────────────
+    def graph_pending(self):
+        """Facts the model proposed that would create new nodes, awaiting you."""
+        try:
+            return {"facts": graph.pending(), "nodes": graph.pending_nodes()}
+        except Exception as e:
+            return {"facts": [], "nodes": [], "error": str(e)}
+
+    def graph_approve(self, names=None):
+        try:
+            n = graph.approve_pending(names or None)
+            self._inspector_dirty()
+            return {"ok": True, "added": n}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def graph_reject(self, names=None):
+        try:
+            return {"ok": True, "dropped": graph.reject_pending(names or None)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
@@ -1025,6 +1626,21 @@ def run(provider=None):
     )
     controller.attach(window)
     window.events.closed += controller.shutdown
+
+    # When an MCP connector wants authorization, show its sign-in page in a
+    # PATROAM window instead of throwing you out to a browser. The window is
+    # closed automatically once the redirect comes back with the code.
+    def _auth_window(url):
+        return webview.create_window(
+            "PATROAM · Authorize connector", url=url,
+            width=520, height=720, min_size=(420, 520),
+            background_color="#0a0a0a", frameless=False)
+
+    try:
+        from .. import mcp_oauth
+        mcp_oauth.set_opener(_auth_window)
+    except Exception:
+        pass
 
     # Make sure the window is actually visible & frontmost once it loads — guards
     # against it being created hidden/minimised/behind at login. Also set the
@@ -1070,4 +1686,9 @@ def run(provider=None):
     # DevTools OFF by default (it kept popping up). Set PATROAM_DEBUG=1 to enable it
     # for troubleshooting (right-click → Inspect → Console).
     debug = os.environ.get("PATROAM_DEBUG", "0") in ("1", "true", "True")
-    webview.start(debug=debug)
+    # private_mode defaults to True, which throws away cookies and localStorage on
+    # exit — that is why n8n asked you to log in again every single launch. A
+    # persistent profile keeps its session (and anything else embedded) signed in.
+    storage = os.path.join(os.path.expanduser("~"), ".patroam", "webview")
+    os.makedirs(storage, exist_ok=True)
+    webview.start(debug=debug, private_mode=False, storage_path=storage)

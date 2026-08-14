@@ -87,13 +87,46 @@ class FileTokenStorage:
         self._write()
 
 
+# How the authorization page gets shown. The UI replaces this with a PATROAM
+# window (set_opener) so you approve access inside the app instead of being
+# thrown out to a browser; without a UI it falls back to the default browser.
+_OPENER = {"open": None}
+
+
+def set_opener(fn):
+    """`fn(url)` shows the authorization page; it may return a handle with
+    .destroy() so the window can be closed once the code comes back."""
+    _OPENER["open"] = fn
+
+
+_window = {"handle": None}
+
+
 async def _redirect_handler(url):
-    print("\n[mcp] PATROAM needs you to authorize access. Opening your browser…")
-    print(f"[mcp] If it doesn't open, visit this URL:\n{url}\n")
+    print("\n[mcp] PATROAM needs you to authorize access.")
+    print(f"[mcp] If nothing opens, visit this URL:\n{url}\n")
+    opener = _OPENER["open"]
+    if opener:
+        try:
+            _window["handle"] = opener(url)
+            return
+        except Exception as e:
+            print(f"[mcp] in-app auth window failed ({e}); using the browser.")
     try:
         webbrowser.open(url)
     except Exception:
         pass
+
+
+def _close_window():
+    """Shut the auth window once the redirect has been captured."""
+    h = _window.pop("handle", None)
+    _window["handle"] = None
+    if h is not None:
+        try:
+            h.destroy()
+        except Exception:
+            pass
 
 
 async def _callback_handler():
@@ -126,6 +159,29 @@ async def _callback_handler():
         return await fut
     finally:
         srv.shutdown()
+        _close_window()
+
+
+def token_path(name):
+    return os.path.join(_oauth_dir(), f"{name}.json")
+
+
+def authorized(name):
+    """True once this server has a token stored (so the panel can say so)."""
+    try:
+        with open(token_path(name), encoding="utf-8") as f:
+            return bool(json.load(f).get("tokens"))
+    except Exception:
+        return False
+
+
+def forget(name):
+    """Sign out of a server — the next connect asks for authorization again."""
+    try:
+        os.remove(token_path(name))
+        return True
+    except OSError:
+        return False
 
 
 def make_oauth_provider(server_url, name, scope=None, client_id=None, client_secret=None):

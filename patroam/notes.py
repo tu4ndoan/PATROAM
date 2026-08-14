@@ -43,8 +43,15 @@ def save_note(title, text):
     De-dupes: identical content isn't saved twice, and the same title overwrites
     (no timestamped duplicates). Returns {say, show, ok, path}."""
     text = (text or "").strip()
-    title = (title or "").strip() or _title_from(text) or \
+    given = (title or "").strip()
+    title = given or _title_from(text) or \
         datetime.datetime.now().strftime("Note %Y-%m-%d %H:%M")
+    if not given:
+        # The title came from the first line, so don't store that line twice —
+        # the Notes panel shows the title above the body.
+        lines = text.splitlines()
+        if lines and lines[0].strip() == title:
+            text = "\n".join(lines[1:]).strip()
     os.makedirs(config.NOTES_DIR, exist_ok=True)
     # Same title → SAME file (overwrite), so re-saving a note never creates
     # timestamped duplicates. Different titles are kept as separate notes.
@@ -87,6 +94,69 @@ def list_notes():
         content = _read(os.path.join(nd, f))
         out.append((title_of(content, os.path.splitext(f)[0]), content))
     return out
+
+
+def _files():
+    nd = config.NOTES_DIR
+    if not os.path.isdir(nd):
+        return []
+    return [os.path.join(nd, f) for f in os.listdir(nd)
+            if os.path.splitext(f)[1].lower() in (".md", ".txt")]
+
+
+def snapshot(limit=200):
+    """Every note, newest first — what the Notes panel lists."""
+    rows = []
+    for path in _files():
+        content = _read(path)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            mtime = 0
+        body = _body(content)
+        rows.append({
+            "id": os.path.basename(path),
+            "title": title_of(content, os.path.splitext(os.path.basename(path))[0]),
+            "body": body,
+            "preview": " ".join(body.split())[:120],
+            "when": datetime.datetime.fromtimestamp(mtime).strftime("%d %b · %H:%M") if mtime else "",
+            "stamp": mtime,
+            "path": path,
+        })
+    rows.sort(key=lambda r: r["stamp"], reverse=True)
+    return {"notes": rows[:limit], "counts": {"total": len(rows)},
+            "folder": config.NOTES_DIR}
+
+
+def delete_note(note_id):
+    """Delete one note file (by its file name)."""
+    name = os.path.basename(note_id or "")
+    if not name:
+        return False
+    path = os.path.join(config.NOTES_DIR, name)
+    # Never follow a path out of the notes folder.
+    if os.path.dirname(os.path.abspath(path)) != os.path.abspath(config.NOTES_DIR):
+        return False
+    try:
+        os.remove(path)
+        return True
+    except OSError:
+        return False
+
+
+def rename_note(note_id, new_title):
+    """Retitle a note in place, keeping its body."""
+    name = os.path.basename(note_id or "")
+    path = os.path.join(config.NOTES_DIR, name)
+    if not name or not os.path.exists(path) or not (new_title or "").strip():
+        return False
+    body = _body(_read(path))
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"# {new_title.strip()}\n\n{body}\n")
+        return True
+    except OSError:
+        return False
 
 
 _REVIEW_PROMPT = (

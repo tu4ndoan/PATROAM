@@ -40,8 +40,18 @@ _CONT_WORDS = {
     "near", "upon", "i", "we", "you", "he", "she", "they", "it", "me", "us",
     "him", "them", "this", "these", "those", "can", "could", "would", "will",
     "should", "let", "let's", "gonna", "wanna", "trying", "going",
+    # Vietnamese — a sentence ending on these is still mid-thought. Without them
+    # PATROAM judged every paused Vietnamese phrase "complete" and cut in.
+    "và", "rồi", "thì", "cho", "với", "để", "mà", "là", "của", "ở", "khi",
+    "nếu", "nhưng", "hoặc", "tại", "vì", "các", "những", "một", "cái", "này",
+    "đó", "sẽ", "đang", "bị", "được", "cùng", "theo", "về", "từ", "đến",
+    "sang", "trong", "ngoài", "trên", "dưới", "sau", "trước", "giữa", "bằng",
+    "tôi", "anh", "em", "nó", "họ", "mình", "bạn", "ông", "bà", "chị",
+    "hãy", "có", "không", "chưa", "vẫn", "cứ", "thêm", "nữa", "hơn",
 }
-_WORDS_RE = re.compile(r"[a-z0-9']+")
+# Unicode-aware: [a-z0-9']+ shredded accented Vietnamese ("rồi" → "r","i"), so the
+# continuation words above could never match.
+_WORDS_RE = re.compile(r"[^\W_]+['’]?[^\W_]*", re.UNICODE)
 
 
 def _vlog(msg):
@@ -101,15 +111,29 @@ class WakeWordListener:
 
     # ── transcription ─────────────────────────────────────────────────────────
     def _transcribe(self, audio):
+        """Best transcript for `audio`. Also stashes Google's other hypotheses in
+        self.alternatives — "patroam" isn't a real word, so the wake phrase often
+        lands in a lower-ranked alternative while the top guess is nonsense."""
+        self.alternatives = []
         if self._recognize:
             return self._recognize(audio)
         try:
-            return self.recognizer.recognize_google(audio)
+            res = self.recognizer.recognize_google(audio, show_all=True)
         except sr.UnknownValueError:
             return ""
         except sr.RequestError as e:
             self.on_status(f"STT error: {e}")
             return ""
+        except Exception:
+            return ""
+        # show_all=True → {"alternative": [{"transcript": ...}, ...]}; older/edge
+        # responses can still be a bare string.
+        if isinstance(res, str):
+            return res
+        alts = [a.get("transcript", "") for a in (res or {}).get("alternative", [])
+                if a.get("transcript")]
+        self.alternatives = alts
+        return alts[0] if alts else ""
 
     # ── session state ───────────────────────────────────────────────────────────
     def _touch(self):
@@ -167,11 +191,34 @@ class WakeWordListener:
             self._chunks.put(("cmd", command))     # → endpoint worker stitches it
 
     def _handle_passive(self, text):
+        # Check EVERY hypothesis Google returned, not just its top guess: the
+        # wake word is a made-up name, so the winning transcript is often junk
+        # ("high bun") while a lower alternative got it right.
         command = find_command(text)
+        heard = text
         if command is None:
-            _vlog(f"no wake word in {text!r}")
+            for alt in (getattr(self, "alternatives", None) or [])[1:]:
+                command = find_command(alt)
+                if command is not None:
+                    heard = alt
+                    break
+        if command is None and config.VOICE_ALWAYS_ON:
+            # No wake word — but in always-on mode the utterance still counts if
+            # it was actually meant for PATROAM. The gate errs towards ignoring.
+            from . import attention
+            if attention.is_for_me(text):
+                _vlog(f"ATTENTION accepted {text!r}")
+                command = text
+            else:
+                _vlog(f"ignored (not addressed): {text!r}")
+                return
+        if command is None:
+            _vlog(f"no wake word in {text!r}"
+                  + (f" (nor in {len(self.alternatives) - 1} alternatives)"
+                     if len(getattr(self, "alternatives", []) or []) > 1 else ""))
             return  # no wake word; stay passive
-        _vlog(f"WAKE matched; command={command!r}")
+        else:
+            _vlog(f"WAKE matched in {heard!r}; command={command!r}")
 
         self.on_wake()
         with self._lock:
